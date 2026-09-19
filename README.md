@@ -31,7 +31,7 @@ from agent.ask import ponder
 
 result = ponder(prompt)
 # result.answer        — the response
-# result.matched_rule  — which domain rule fired, if any ("financial_total")
+# result.matched_rule  — which domain rule fired, if any ("paediatric_dose")
 # result.rule_reason   — why that rule exists, and what it overrode
 # result.budget        — "cheap" or "deep"
 # result.verified      — True if a sandbox executed and confirmed it
@@ -39,7 +39,7 @@ result = ponder(prompt)
 ```
 
 ```bash
-uv run python -m agent.ask "What is the total cost of 3 items at 4.50 each?"
+uv run python -m agent.ask "A child weighs 24 kg. Amoxicillin is 20 mg/kg per dose. What is a single dose in mg?"
 ```
 
 ### Governing an agent you already have
@@ -51,12 +51,12 @@ wrote** — its own model, its own tools, its own prompts — and polices every 
 from pydantic_ai import Agent
 from agent.govern import govern
 
-support = Agent("openai:gpt-5", tools=[order_total, issue_refund])   # unchanged
-support = govern(support)                                            # one line
+ward = Agent("openai:gpt-5", tools=[lookup_weight, check_allergies])   # unchanged
+ward = govern(ward)                                                    # one line
 
-result = support.run_sync("Order 4471 is 1029.00 net — what's the gross at 20% VAT?")
+result = ward.run_sync("A child weighs 24 kg. Amoxicillin is 20 mg/kg per dose — what is one dose?")
 result.output                 # the answer, as before
-result.ponder.matched_rule    # 'financial_total'
+result.ponder.matched_rule    # 'paediatric_dose'
 result.ponder.budget          # 'deep'  — the rule overrode the easy-looking score
 result.ponder.samples         # 6       — best-of-N across Modal containers
 result.ponder.verified        # True    — recomputed in a sandbox before it was trusted
@@ -101,6 +101,143 @@ errors it does make are on things like a lily-pad riddle. Triage in that run is 
 `gemini-3.6-flash` judge, scoring from the prompt text alone.
 
 ---
+
+## The demo case
+
+One command, one prompt, every load-bearing part of the system:
+
+```bash
+uv run python scripts/demo_case.py
+```
+
+```
+Insulin is dosed at 1 unit per 10 g of carbohydrate. A meal contains 80 g of
+carbohydrate. How many units are required? Give the answer to one decimal place.
+```
+
+**Why this prompt.** Insulin is an ISMP high-alert medication, so the named rule demands
+deep reasoning and sandbox verification however trivial `80 / 10` looks. And asking for
+"one decimal place" pushes the model into writing **8.0 units** — a trailing zero on an
+insulin dose is the textbook tenfold-overdose mechanism, because `8.0` read without its
+decimal point is `80`. The request itself induces the unsafe notation, and the guardrail
+catches it. The instruction and the safety rule genuinely conflict, and the audit record
+says so rather than quietly complying.
+
+What it asserts, and what a judge sees:
+
+```
+PASS  budget is deep                     budget=deep
+PASS  a named rule overrode the score    rule=high_alert_medication
+PASS  easy task, maximum effort          difficulty=0.1 stakes=0.9
+PASS  the rule added what the score cannot sandbox + 5 named guards
+PASS  Modal fanned out                   8 samples
+PASS  sandbox executed the answer        ran=True passed=True
+PASS  a guardrail fired                  tripped=['safe_dose_notation']
+PASS  scope guard cleared the prompt     health_topics_only=allow
+PASS  every required guard has a verdict 5/5 recorded
+PASS  the answer is arithmetically right expected 8 units
+```
+
+Every guardrail the rule required carries a verdict, including the input-stage scope
+check that cleared the prompt before any compute was committed:
+
+```
+   health_topics_only         allow
+   numeric_answer_present     allow
+   units_present              allow
+-> safe_dose_notation         retry   unsafe dose notation (trailing zero: '8.0') — ISMP Do Not Use
+   no_hedging                 allow
+```
+
+The script prints a **Logfire trace link** for the run. In the trace you see the eight
+parallel Modal samples, the Gateway rule each carried, the token counts, the sandbox
+execution, and the guardrail spans the harness emitted. The same verdicts appear on the
+**decision receipt** in Mission Control — open the task and press *Receipt*.
+
+Difficulty 0.10, stakes 0.90: the task is genuinely easy and still gets maximum effort.
+That is the thesis in one line — **stakes bought the compute, not difficulty**.
+
+## Integrating with the Pydantic AI library
+
+Ponder is not a wrapper that reimplements an agent framework. It is a policy layer that sits
+on Pydantic AI's own extension points, which is why a governed agent stays the object you
+wrote. Three surfaces, in increasing order of how much of your code stays yours.
+
+### 1. `ponder(prompt)` — replace a model call
+
+```python
+from agent.ask import ponder
+
+result = ponder("A child weighs 24 kg. Amoxicillin is 20 mg/kg per dose. What is one dose?")
+```
+
+Ponder builds the `Agent` for you, one per (Gateway rule, guardrail chain), and runs the full
+loop. Use this when the model call is yours to own.
+
+### 2. `govern(agent)` — police an agent someone else wrote
+
+```python
+from pydantic_ai import Agent
+from agent.govern import govern
+
+ward = govern(Agent("openai:gpt-5", tools=[lookup_weight]))
+result = ward.run_sync("...")
+result.ponder.matched_rule   # the policy decision, alongside the normal output
+```
+
+`govern` **never mutates the agent**. It supplies a *sampler* to the same `run_task` the batch
+queue uses, so a governed call gets the same triage, rules, guardrail gate, sandbox and one
+`TaskEvent`. There is no second pipeline to keep in sync.
+
+### 3. `capabilities()` — take just the guardrails
+
+```python
+from pydantic_ai import Agent
+from agent.guardrails import capabilities
+
+agent = Agent(model, capabilities=capabilities(("health_topics_only", "safe_dose_notation")))
+```
+
+The guard chain is a plain list of Pydantic capabilities. Attach it at construction, or pass
+it per run, and use none of the rest of Ponder.
+
+### Which Pydantic AI primitives are used, and where
+
+| Pydantic AI / Harness primitive | Where | What it does for us |
+|---|---|---|
+| `Agent(...)` | `worker._agent_for` | one agent per (Gateway rule, guard chain) |
+| `providers.gateway.gateway_provider` | `worker._gateway_model` | BYOK route to the Modal endpoint |
+| `models.openai.OpenAIChatModel` | `worker._gateway_model` | the wire protocol vLLM serves |
+| `capabilities=[...]` | `worker._agent_for`, `govern` | attaches guardrails without subclassing |
+| `guardrails.InputGuardrail` | `guardrails.input_chain` | redaction + scope, **before** the request |
+| `guardrails.OutputGuardrail` | `guardrails.output_chain` | answer checks, raises real `ModelRetry` |
+| `guardrails.detectors` | `guardrails.input_chain` | first-party secret / PII redaction |
+| `GuardrailResult.allow/retry/block` | every guard | the verdict vocabulary |
+| `exceptions.ModelRetry` | raised by the framework | a failed output check re-asks the model |
+| `guardrails.OutputBlocked` | caught in `worker.gateway_sample` | a policy refusal, not a failed call |
+| `model_settings=` | `worker.call_settings` | reasoning effort + the Gateway rule header |
+| `logfire.instrument_pydantic_ai()` | `events.py` | every call traced, with tokens |
+
+### The two things worth copying
+
+**Guardrails ride on `capabilities`, not on a subclass.** That parameter accepts a per-run
+value, which is the whole reason `govern()` can police an agent it did not construct — the
+guards travel with the call instead of having to be baked into someone else's `Agent`.
+
+**A blocking input guard means the model is never called.** `InputGuardrail` turns a `block`
+verdict into `SkipModelRequest`, so an out-of-scope prompt costs zero tokens and the harness
+emits its own `trace_block` span. This is framework behaviour, not ours — the test asserts the
+model call count is exactly `0`:
+
+```python
+agent = Agent(FunctionModel(record), capabilities=capabilities(("health_topics_only",)))
+asyncio.run(agent.run("Who won the World Cup in 2022?"))
+assert calls == []        # tests/test_guardrails.py
+```
+
+One constraint the framework enforces and worth knowing before you write a guard: an
+`InputGuardrail` guard may **not** return `GuardrailResult.retry()` — it raises `UserError`.
+Retry applies to model output only, which is why scope guards are declared `block`.
 
 ## The rule layer
 

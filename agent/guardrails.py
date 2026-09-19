@@ -512,6 +512,18 @@ def capabilities(names: tuple[str, ...] = ()) -> list:
     return caps
 
 
+def input_guard_names(names: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """Which of these guards run on the prompt rather than the answer.
+
+    The loop needs this to keep input verdicts on the event when the output gate
+    rewrites the verdict list -- an audit record that lists a guardrail as required
+    but carries no verdict for it reads as a guard that never ran.
+    """
+    if not names:
+        return tuple(s.name for s in REGISTRY if s.on_input)
+    return tuple(n for n in names if n in _BY_NAME and _BY_NAME[n].on_input)
+
+
 def check_input(names: tuple[str, ...], prompt: str) -> Report:
     """Run the rule's input-stage guards over the prompt, before any compute is committed.
 

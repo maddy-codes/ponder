@@ -80,7 +80,14 @@ export const ruleVerdict = (e: TaskEvent) =>
  */
 export const guardrailOutcome = (e: TaskEvent) => {
   if (!e.guardrails?.length) return "no guardrails required by the matched rule";
-  if (e.guardrail_blocked) return "BLOCKED — the answer was withheld";
+  if (e.guardrail_blocked) {
+    // No samples means nothing was ever spent, which only happens when an input-stage
+    // guard refused the prompt. Worth saying outright: it is the difference between
+    // "we paid for an answer and threw it away" and "the model was never asked".
+    return e.samples?.length
+      ? "BLOCKED — the answer was withheld"
+      : "BLOCKED before any compute — the prompt was refused and no model call was made";
+  }
   const failed = (e.guardrail_verdicts ?? []).filter((v) => v.outcome !== "allow");
   if (e.guardrail_escalated) {
     return failed.length

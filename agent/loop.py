@@ -16,7 +16,7 @@ from agent.budget import Decision, decide
 from agent.events import Emitter, GuardrailVerdict, Sample, TaskEvent, get_emitter, start_fresh
 from agent.grader import grade
 from agent.guardrails import check as check_guardrails
-from agent.guardrails import check_input
+from agent.guardrails import check_input, input_guard_names
 from agent.rules import apply as apply_rules
 from agent.settings import EVENTS_PATH, settings
 from agent.tasks import Task, load_tasks
@@ -91,9 +91,12 @@ async def run_task(
     # sandbox and no tokens -- the refusal IS the finished task, so it emits its own
     # TaskEvent like any other and there is still exactly one per task.
     scope = check_input(decision.guardrails, task.prompt)
+    # Recorded whether it passed or not. A verdict of `allow` is evidence the guard ran
+    # and cleared the prompt; omitting it would leave the receipt listing a required
+    # guardrail with no outcome, which is indistinguishable from one that never ran.
+    event.guardrails = list(decision.guardrails)
+    event.guardrail_verdicts = [GuardrailVerdict(**v.to_json()) for v in scope.verdicts]
     if scope.blocked:
-        event.guardrails = list(decision.guardrails)
-        event.guardrail_verdicts = [GuardrailVerdict(**v.to_json()) for v in scope.verdicts]
         event.guardrail_blocked = True
         event.samples = []
         event.answer = f"[withheld by guardrail] {scope.block_message}"
@@ -172,7 +175,11 @@ async def _gate(
         return answer, rule_id
 
     report = check_guardrails(decision.guardrails, answer)
-    event.guardrail_verdicts = [GuardrailVerdict(**v.to_json()) for v in report.verdicts]
+    # Input-stage verdicts were recorded before any spend and are kept: the audit record
+    # is every guard the rule demanded, in stage order, not just the answer-side ones.
+    on_input = set(input_guard_names(decision.guardrails))
+    kept = [v for v in event.guardrail_verdicts if v.name in on_input]
+    event.guardrail_verdicts = kept + [GuardrailVerdict(**v.to_json()) for v in report.verdicts]
 
     if report.blocked:
         event.guardrail_blocked = True

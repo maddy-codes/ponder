@@ -672,3 +672,50 @@ def test_a_blocked_prompt_costs_nothing_and_still_emits_one_event():
     assert event.status == "done"
     assert len(emitter.events) == 1, "still exactly one durable TaskEvent"
     assert event.correct is None, "a refusal is not a wrong answer"
+
+
+def test_every_required_guardrail_carries_a_verdict_on_the_record():
+    """The receipt lists `guardrails` and renders `guardrail_verdicts` beside them.
+
+    Input-stage guards used to be recorded only when they blocked, so a passing scope
+    check left the receipt showing a required guardrail with no outcome -- indistinguishable
+    from one that never ran. Every guard the rule demanded must report.
+    """
+    async def sampler(task, budget, rule_id, n, guardrails):
+        from agent.worker import WorkerResult
+
+        return [WorkerResult("The dose is 480 mg", 10, 0.1) for _ in range(n)]
+
+    task = Task(
+        id="rec1",
+        prompt="A 24 kg child is prescribed 20 mg/kg per dose. What is a single dose in mg?",
+        answer="480", kind="numeric",
+    )
+    event = asyncio.run(run_task(task, "ponder", Quiet(), sampler=sampler))
+
+    assert event.matched_rule == "paediatric_dose"
+    assert "health_topics_only" in event.guardrails, "scope rides on every task"
+    reported = {v.name for v in event.guardrail_verdicts}
+    assert reported == set(event.guardrails), (
+        f"missing verdicts for {set(event.guardrails) - reported}"
+    )
+    assert all(v.outcome in {"allow", "retry", "block"} for v in event.guardrail_verdicts)
+
+
+def test_input_verdicts_survive_the_output_gate():
+    """`_gate` rewrites the verdict list; the scope verdict recorded before the spend
+    must not be dropped when it does."""
+    async def sampler(task, budget, rule_id, n, guardrails):
+        from agent.worker import WorkerResult
+
+        return [WorkerResult("480", 10, 0.1) for _ in range(n)]   # no unit -> gate fires
+
+    task = Task(
+        id="rec2",
+        prompt="A 24 kg child is prescribed 20 mg/kg per dose. What is a single dose in mg?",
+        answer="480 mg", kind="numeric",
+    )
+    event = asyncio.run(run_task(task, "ponder", Quiet(), sampler=sampler))
+    names = [v.name for v in event.guardrail_verdicts]
+    assert "health_topics_only" in names, "the input verdict was clobbered by the gate"
+    assert "units_present" in names
