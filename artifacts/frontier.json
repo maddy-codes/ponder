@@ -1,0 +1,92 @@
+{
+  "reports": [
+    {
+      "strategy": "cheap",
+      "n": 40,
+      "correct": 23,
+      "accuracy": 0.575,
+      "high_stakes_n": 18,
+      "high_stakes_correct": 12,
+      "high_stakes_accuracy": 0.6667,
+      "total_tokens": 2317,
+      "total_gpu_seconds": 31.99,
+      "deep_tasks": 0,
+      "sandbox_runs": 0,
+      "misses": [
+        "e02",
+        "e06",
+        "e09",
+        "e10",
+        "h01",
+        "h02",
+        "h03",
+        "h04",
+        "h06",
+        "h07",
+        "h09",
+        "s05",
+        "s09",
+        "x01",
+        "x02",
+        "x03",
+        "x06"
+      ],
+      "low_stakes_share_of_misses": 0.6471
+    },
+    {
+      "strategy": "deep",
+      "n": 40,
+      "correct": 34,
+      "accuracy": 0.85,
+      "high_stakes_n": 18,
+      "high_stakes_correct": 16,
+      "high_stakes_accuracy": 0.8889,
+      "total_tokens": 182377,
+      "total_gpu_seconds": 2507.75,
+      "deep_tasks": 40,
+      "sandbox_runs": 40,
+      "misses": [
+        "e02",
+        "e06",
+        "e10",
+        "h06",
+        "s09",
+        "x05"
+      ],
+      "low_stakes_share_of_misses": 0.6667
+    },
+    {
+      "strategy": "ponder",
+      "n": 40,
+      "correct": 29,
+      "accuracy": 0.725,
+      "high_stakes_n": 18,
+      "high_stakes_correct": 16,
+      "high_stakes_accuracy": 0.8889,
+      "total_tokens": 89283,
+      "total_gpu_seconds": 1238.67,
+      "deep_tasks": 21,
+      "sandbox_runs": 18,
+      "misses": [
+        "e02",
+        "e06",
+        "e09",
+        "e10",
+        "h01",
+        "h02",
+        "h04",
+        "h06",
+        "h09",
+        "s09",
+        "x05"
+      ],
+      "low_stakes_share_of_misses": 0.8182
+    }
+  ],
+  "verdict": [
+    "compute: ponder uses 51% fewer tokens and 51% less GPU time than always-deep.",
+    "high-stakes accuracy: ponder 89% vs always-deep 89% vs always-cheap 67%.",
+    "error placement: 82% of ponder's misses are low-stakes (always-cheap: 65%).",
+    "VERDICT: frontier holds."
+  ]
+}
