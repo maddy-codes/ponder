@@ -1,96 +1,288 @@
 "use client";
 
-import { useState } from "react";
-import { EffortView } from "@/components/EffortView";
-import { EvidenceStrip } from "@/components/EvidenceStrip";
-import { FrontierMeter } from "@/components/FrontierMeter";
-import { Queue } from "@/components/Queue";
-import { SpendCounter } from "@/components/SpendCounter";
-import { TaskInput } from "@/components/TaskInput";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Coins, Cpu, FlaskConical, Layers, Scale, TriangleAlert } from "lucide-react";
+import { AskBox } from "@/components/ask-box";
+import { BudgetChart } from "@/components/charts/budget-chart";
+import { DecisionMap } from "@/components/charts/decision-map";
+import { FrontierChart } from "@/components/charts/frontier-chart";
+import { SpendChart } from "@/components/charts/spend-chart";
+import { StakesAccuracyChart } from "@/components/charts/stakes-accuracy-chart";
+import { EvidenceBar } from "@/components/evidence-bar";
+import { Panel, SectionHeading, Stat } from "@/components/primitives";
+import { QueueList } from "@/components/queue-list";
+import { RuleLedger } from "@/components/rule-ledger";
+import { SiteHeader } from "@/components/site-header";
+import { TaskDetail } from "@/components/task-detail";
+import { TaskTable } from "@/components/task-table";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  accuracyByStakes,
+  budgetMix,
+  cumulativeSpend,
+  decisionMap,
+  fmtGpu,
+  fmtTokens,
+  pct,
+  ruleLedger,
+  totals,
+} from "@/lib/derive";
+import { bareId, type TaskEvent } from "@/lib/types";
 import { useRun } from "@/lib/useRun";
-
-const SPEEDS = [1, 2, 4];
 
 export default function MissionControl() {
   const [speed, setSpeed] = useState(2);
   const [playing, setPlaying] = useState(true);
-  const { state, frontier, ruleProof, reset, inject } = useRun(speed, playing);
+  const { state, frontier, ruleProof, reset, inject, queue, deepTwins } = useRun(speed, playing);
+
+  /** null = follow the live task; otherwise the id of the task the user clicked into. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [ruleFilter, setRuleFilter] = useState<string | null>(null);
+  const consoleRef = useRef<HTMLDivElement>(null);
+
+  const landed = state.completed;
+
+  const byBareId = useMemo(() => {
+    const map = new Map<string, TaskEvent>();
+    for (const e of queue) map.set(bareId(e), e);
+    return map;
+  }, [queue]);
+
+  const selectById = useCallback(
+    (id: string) => {
+      setSelectedId((prev) => (prev === id ? prev : id));
+      consoleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    []
+  );
+
+  /** Charts key on the short id, so translate before selecting. */
+  const selectByBareId = useCallback(
+    (short: string) => {
+      const found = byBareId.get(short);
+      if (found) selectById(found.id);
+    },
+    [byBareId, selectById]
+  );
+
+  const selected = selectedId ? queue.find((e) => e.id === selectedId) : undefined;
+  const detail = selected ?? state.current ?? landed[landed.length - 1];
+  const following = !selected;
+
+  const t = useMemo(() => totals(landed, deepTwins), [landed, deepTwins]);
+  const spendSeries = useMemo(() => cumulativeSpend(landed, deepTwins), [landed, deepTwins]);
+  const mix = useMemo(() => budgetMix(landed), [landed]);
+  const rules = useMemo(() => ruleLedger(landed), [landed]);
+  const map = useMemo(() => decisionMap(landed), [landed]);
+  const bands = useMemo(() => accuracyByStakes(landed), [landed]);
+
+  const saved = state.hasCounterfactual && t.counterTokens > 0 ? 1 - t.tokens / t.counterTokens : 0;
+  const ponderReport = frontier?.reports.find((r) => r.strategy === "ponder");
+  const deepReport = frontier?.reports.find((r) => r.strategy === "deep");
 
   return (
-    <main className="mx-auto flex h-screen max-w-[1500px] flex-col gap-3 p-4">
-      <header className="flex items-center gap-4">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight text-zinc-100">
-            Ponder <span className="text-zinc-600">·</span>{" "}
-            <span className="text-zinc-400">Mission Control</span>
-          </h1>
-          <p className="text-xs text-zinc-500">
-            A named domain rule decides how hard the model thinks — and whether its answer is
-            verified before you trust it.
-          </p>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <span className="rounded-full border border-zinc-700 px-2.5 py-1 text-[10px] uppercase tracking-widest text-zinc-400">
-            replay
-          </span>
-          <button
-            onClick={() => setPlaying((p) => !p)}
-            className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
-            {playing ? "pause" : "play"}
-          </button>
-          <button
-            onClick={reset}
-            className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
-            restart
-          </button>
-          <div className="flex overflow-hidden rounded-md border border-zinc-700">
-            {SPEEDS.map((s) => (
-              <button
-                key={s}
-                onClick={() => setSpeed(s)}
-                className={`px-2.5 py-1 text-xs ${
-                  speed === s ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:bg-zinc-800"
-                }`}
-              >
-                {s}×
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
-
-      {state.error && (
-        <div className="rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          {state.error}
-        </div>
-      )}
-
-      <TaskInput
-        onEvent={(event) => {
-          setPlaying(true);
-          inject(event);
+    <div className="min-h-screen">
+      <SiteHeader
+        playing={playing}
+        onToggle={() => setPlaying((p) => !p)}
+        onRestart={() => {
+          setSelectedId(null);
+          reset();
         }}
+        speed={speed}
+        onSpeed={setSpeed}
+        done={landed.length}
+        total={state.total}
       />
 
-      <div className="grid min-h-0 flex-1 grid-cols-12 gap-3">
-        <div className="col-span-3 min-h-0">
-          <Queue completed={state.completed} current={state.current} total={state.total} />
-        </div>
+      <main className="mx-auto max-w-[1560px] space-y-8 px-5 py-6">
+        {state.error && (
+          <Alert className="border-deep/40 bg-deep/8">
+            <TriangleAlert className="text-deep" />
+            <AlertDescription className="text-deep">{state.error}</AlertDescription>
+          </Alert>
+        )}
 
-        <div className="col-span-5 min-h-0">
-          <EffortView event={state.current} stage={state.stage} samplesLit={state.samplesLit} />
-        </div>
+        {/* ── This run ─────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <SectionHeading
+            title="This run"
+            description="An agent that decides how hard to think — and whether to verify before you trust it."
+          />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <Stat
+              icon={Layers}
+              label="Tasks landed"
+              value={`${t.n}`}
+              unit={`of ${state.total}`}
+              hint={`${t.deep} deep · ${t.cheap} cheap`}
+            />
+            <Stat
+              icon={Coins}
+              label="Compute saved"
+              value={saved > 0 ? pct(saved) : "—"}
+              tone="ok"
+              hint={
+                state.hasCounterfactual
+                  ? `${fmtTokens(t.tokens)} vs ${fmtTokens(t.counterTokens)} always-deep`
+                  : `${fmtTokens(t.tokens)} spent · no always-deep run recorded`
+              }
+            />
+            <Stat
+              icon={Cpu}
+              label="GPU burned"
+              value={fmtGpu(t.gpu)}
+              hint={`${fmtTokens(t.tokens)} tokens across ${t.n} tasks`}
+            />
+            <Stat
+              icon={Scale}
+              label="Rule decisions"
+              value={`${t.matched}`}
+              unit={t.n ? `of ${t.n}` : undefined}
+              tone="rule"
+              hint={
+                t.matched
+                  ? `${t.overrides} overrode the score · ${t.matched - t.overrides} confirmed it`
+                  : "no named rule has fired yet"
+              }
+            />
+            <Stat
+              icon={FlaskConical}
+              label="Sandbox verified"
+              value={`${t.sandboxRuns}`}
+              tone="deep"
+              hint={`${t.sandboxPassed} executed and agreed`}
+            />
+          </div>
+        </section>
 
-        <div className="col-span-4 flex min-h-0 flex-col gap-3">
-          <SpendCounter spend={state.spend} counterfactual={state.counterfactual} />
-          <FrontierMeter frontier={frontier} />
-        </div>
-      </div>
+        <AskBox
+          onEvent={(event) => {
+            setPlaying(true);
+            setSelectedId(null);
+            inject(event);
+          }}
+        />
 
-      <EvidenceStrip ruleProof={ruleProof} frontier={frontier} />
-    </main>
+        {/* ── Console ──────────────────────────────────────────────────── */}
+        <section ref={consoleRef} className="scroll-mt-20 space-y-3">
+          <SectionHeading
+            title="Console"
+            description="Click any task — in the queue, the map or the log — to inspect its decision."
+          />
+          {state.loading ? (
+            <Skeleton className="h-[620px] w-full rounded-xl" />
+          ) : (
+            <div className="grid gap-3 lg:h-[620px] lg:grid-cols-12">
+              <div className="h-[420px] lg:col-span-4 lg:h-auto lg:min-h-0">
+                <QueueList
+                  completed={landed}
+                  current={state.current}
+                  total={state.total}
+                  selectedId={selectedId}
+                  onSelect={selectById}
+                  following={following}
+                  onFollow={() => setSelectedId(null)}
+                />
+              </div>
+              <div className="h-[620px] lg:col-span-8 lg:h-auto lg:min-h-0">
+                <TaskDetail
+                  event={detail}
+                  stage={state.stage}
+                  samplesLit={state.samplesLit}
+                  live={following && Boolean(state.current)}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* ── Spend ────────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <SectionHeading
+            title="Spend"
+            description="What the run cost, against what always-deep would have cost for the same queue."
+          />
+          <div className="grid gap-3 lg:grid-cols-5">
+            <div className="h-[300px] lg:col-span-3">
+              <SpendChart points={spendSeries} hasCounterfactual={state.hasCounterfactual} />
+            </div>
+            <div className="h-[300px] lg:col-span-2">
+              <BudgetChart slices={mix} />
+            </div>
+          </div>
+        </section>
+
+        {/* ── Decisions ────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <SectionHeading
+            title="Decisions"
+            description="Where the compute went, and which named rule put it there."
+          />
+          <div className="grid gap-3 lg:grid-cols-5">
+            <div className="h-[380px] lg:col-span-3">
+              <DecisionMap
+                points={map}
+                focusId={detail ? bareId(detail) : null}
+                dimOthers={Boolean(selected)}
+                onSelect={selectByBareId}
+              />
+            </div>
+            <div className="h-[380px] lg:col-span-2">
+              <RuleLedger rows={rules} activeRule={ruleFilter} onPick={setRuleFilter} />
+            </div>
+          </div>
+        </section>
+
+        {/* ── Baselines ────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <SectionHeading
+            title="Baselines"
+            description="Ponder against always-cheap and always-deep on the same queue."
+          />
+          <div className="grid gap-3 lg:grid-cols-5">
+            <div className="h-[340px] lg:col-span-3">
+              <FrontierChart frontier={frontier} />
+            </div>
+            <div className="h-[340px] lg:col-span-2">
+              <StakesAccuracyChart bands={bands} />
+            </div>
+          </div>
+          {ponderReport && deepReport && (
+            <Panel className="px-4 py-3">
+              <p className="text-sm text-muted-foreground">
+                Ponder holds{" "}
+                <span className="font-medium text-foreground">
+                  {pct(ponderReport.high_stakes_accuracy)}
+                </span>{" "}
+                high-stakes accuracy against always-deep&rsquo;s{" "}
+                <span className="font-medium text-foreground">
+                  {pct(deepReport.high_stakes_accuracy)}
+                </span>
+                , on{" "}
+                <span className="font-medium text-foreground">
+                  {fmtGpu(ponderReport.total_gpu_seconds)}
+                </span>{" "}
+                of GPU instead of {fmtGpu(deepReport.total_gpu_seconds)}.
+              </p>
+            </Panel>
+          )}
+          <EvidenceBar ruleProof={ruleProof} frontier={frontier} />
+        </section>
+
+        {/* ── Task log ─────────────────────────────────────────────────── */}
+        <section className="space-y-3 pb-10">
+          <SectionHeading title="Task log" description="Every task in the recording." />
+          <TaskTable
+            events={landed}
+            selectedId={selectedId}
+            onSelect={selectById}
+            ruleFilter={ruleFilter}
+            onClearRuleFilter={() => setRuleFilter(null)}
+          />
+        </section>
+      </main>
+    </div>
   );
 }

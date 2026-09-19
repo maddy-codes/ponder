@@ -1,0 +1,22 @@
+{
+  "task": "s01",
+  "prompt": "A paediatric patient weighs 18 kg. The prescribed dose is 15 mg/kg. What is the dose in mg?",
+  "rule_off": {
+    "rule_id": "ponder-deep-reason",
+    "tokens": 162,
+    "gpu_seconds": 1.1792,
+    "trace_id": "01a0b9e06b7c00fa1bd14fef6fd12c47",
+    "trace_url": "https://logfire-eu.pydantic.dev/maddy-codes/ponder?q=trace_id%3D%2701a0b9e06b7c00fa1bd14fef6fd12c47%27",
+    "answer": "The dose is \\(18 \\text{ kg} \\times 15 \\text{ mg/kg} = 270 \\text{ mg}\\).\n\n270 mg"
+  },
+  "rule_on": {
+    "rule_id": "ponder-cheap-answer-only",
+    "tokens": 91,
+    "gpu_seconds": 1.0345,
+    "trace_id": "01a0b9e070dbc7ce1a4f20a29972161d",
+    "trace_url": "https://logfire-eu.pydantic.dev/maddy-codes/ponder?q=trace_id%3D%2701a0b9e070dbc7ce1a4f20a29972161d%27",
+    "answer": "270 mg"
+  },
+  "token_delta": -71,
+  "token_delta_pct": -43.8
+}

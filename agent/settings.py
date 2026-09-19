@@ -32,7 +32,17 @@ class Settings:
     gateway_base_url: str = field(
         default_factory=lambda: _env("PYDANTIC_AI_GATEWAY_BASE_URL", "https://gateway.pydantic.dev/v1")
     )
-    gateway_model: str = field(default_factory=lambda: _env("GATEWAY_MODEL", "modal/ponder-worker"))
+    # The BYOK provider name you created in the Gateway console. Separate from the
+    # model: a Hugging Face repo id contains a slash, so it cannot be split apart.
+    gateway_route: str = field(default_factory=lambda: _env("GATEWAY_ROUTE", "modal"))
+    # A Gateway Optimization binds to a ROUTE, not to a per-request header, so effort is
+    # switched by pointing at a different BYOK provider. Both providers front the SAME
+    # Modal endpoint; only the optimization installed on each differs. Blank = one route
+    # for both, and the effort difference falls back to the system prompt alone.
+    route_cheap: str = field(default_factory=lambda: _env("GATEWAY_ROUTE_CHEAP"))
+    route_deep: str = field(default_factory=lambda: _env("GATEWAY_ROUTE_DEEP"))
+    # The Hugging Face repo id served by that endpoint, used verbatim.
+    gateway_model: str = field(default_factory=lambda: _env("GATEWAY_MODEL"))
     rule_cheap: str = field(default_factory=lambda: _env("GATEWAY_RULE_CHEAP", "ponder-cheap-answer-only"))
     rule_deep: str = field(default_factory=lambda: _env("GATEWAY_RULE_DEEP", "ponder-deep-reason"))
 
@@ -45,6 +55,8 @@ class Settings:
 
     convex_url: str = field(default_factory=lambda: _env("CONVEX_URL") or _env("NEXT_PUBLIC_CONVEX_URL"))
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
+    # Pinned in env, not in code: Google retires judge models faster than we rebuild.
+    gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "gemini-3.6-flash"))
 
     # --- effort dials -------------------------------------------------
     deep_samples: int = 5          # best-of-N width on the deep path

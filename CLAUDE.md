@@ -36,8 +36,11 @@ items.
    the Logfire API at runtime.
 4. **`events.jsonl` is always written**, Convex up or down. It is the Replay file; the demo runs
    off a recorded known-good run, not live model calls.
-5. **The dashboard is a pure renderer.** Every panel reads fields that `TaskEvent` already carries.
+5. **The dashboard is a pure renderer.** Every panel reads fields that `TaskEvent` already carries;
+   all aggregation lives in `web/lib/derive.ts` as pure functions over `TaskEvent[]`.
    If a panel would need new backend work, cut the panel.
+   It is also *navigable*: any task is clickable from the queue, the decision map or the task log,
+   and opens in the console detail pane. Clicking never mutates the recording.
 6. **No auth, no Clerk, no services outside the locked stack.** Single user, single page.
 
 ## Architecture
@@ -91,6 +94,17 @@ once (Pydantic model → Convex schema → renderer) or not at all.
 Pydantic AI (agent) · Pydantic AI Gateway (effort rules, BYOK to the Modal endpoint) · Logfire
 (traces + compute numbers) · Modal (GPU model endpoint, `.map()` fan-out, Sandboxes) · Convex
 (transport) · Next.js App Router + Tailwind + Recharts (Mission Control) · plain Python grading.
+The UI layer is shadcn/ui on Tailwind v4 tokens: `components/ui/*` is copied-in source, not a
+dependency. Light and dark are both first-class (next-themes writes `.dark` on `<html>`; the switch
+lives in the header), so every colour comes from a token defined for *both* modes in
+`app/globals.css` — `--rule`, `--deep`, `--cheap`, `--stakes`, `--difficulty`, `--live`, `--ok`,
+`--miss` for UI text and chips, and a separate `--chart-1..5` set for chart marks. The accent is
+the brand indigo sampled off `logo.png` (`#3f3bfc`), and dark mode's ground is the logo's own ink
+(`#080e21`). Logo assets are generated from that one file: `web/public/ponder-{lockup,mark}.png`
+plus `-dark` variants (the ink is recoloured, never CSS-inverted — that would flip the blue), and
+`web/app/{icon,apple-icon}.png` which Next serves as the favicons. No ad-hoc hex,
+no `zinc-*`, and never a UI accent used as a mark colour: the chart steps are tuned against the
+chart surface, the UI accents against body text.
 
 Worker model must be an open-weight **dense single-GPU** instruct model (~7–14B). **Not** MoE —
 an MoE model risks sitting unscheduled.
@@ -101,8 +115,12 @@ an MoE model risks sitting unscheduled.
 agent/    loop.py triage.py rules.py ask.py gateway.py modal_app.py events.py grader.py
           baselines.py tasks.jsonl
 convex/   schema.ts events.ts
-web/      app/page.tsx app/api/ask/route.ts
-          components/{Queue,EffortView,FrontierMeter,SpendCounter,EvidenceStrip,TaskInput}
+web/      app/{page.tsx,layout.tsx,globals.css} app/api/ask/route.ts
+          lib/{types,derive,useRun}.ts       # derive.ts holds every aggregate the panels read
+          components/{site-header,theme-toggle,theme-provider,primitives}
+          components/{queue-list,task-detail,task-table,rule-ledger,ask-box,evidence-bar}
+          components/charts/{spend,budget,decision-map,frontier,stakes-accuracy}-chart.tsx
+          components/ui/*   # shadcn/ui (base-nova, Base UI primitives) -- owned source, edit freely
 events.jsonl   # recorded known-good run (Replay)
 ```
 

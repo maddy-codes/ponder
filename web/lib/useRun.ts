@@ -16,6 +16,10 @@ export type RunState = {
   samplesLit: number;
   /** what always-deep would have spent on the same tasks so far */
   counterfactual: { tokens: number; gpuSeconds: number };
+  /** false when the recording holds no `deep` events -- then the counterfactual is
+   *  just the ponder spend echoed back, and the panels must say so rather than
+   *  claim a 0% saving. */
+  hasCounterfactual: boolean;
   spend: { tokens: number; gpuSeconds: number };
   finished: boolean;
   total: number;
@@ -167,9 +171,10 @@ export function useRun(speed: number, playing: boolean, strategy = "ponder") {
     samplesLit,
     spend,
     counterfactual,
+    hasCounterfactual: deepByTask.size > 0,
     finished: queue.length > 0 && index >= queue.length,
     total: queue.length,
   };
 
-  return { state, frontier, ruleProof, reset, inject, queue };
+  return { state, frontier, ruleProof, reset, inject, queue, deepTwins: deepByTask };
 }

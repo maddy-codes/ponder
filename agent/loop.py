@@ -21,6 +21,9 @@ from agent.triage import Triage, triage
 from agent.verify import verify
 from agent.worker import fan_out
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def plan(task: Task, strategy: str) -> tuple[Triage, Decision]:
     """Triage always runs -- the baselines need the same scores for reporting --

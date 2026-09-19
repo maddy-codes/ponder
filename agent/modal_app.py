@@ -47,7 +47,11 @@ vllm_image = (
 
 agent_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("pydantic-ai-slim[openai]>=0.0.30", "pydantic>=2.9", "logfire>=2.0")
+    .pip_install(
+        "pydantic-ai-slim[openai]>=0.0.30", "pydantic>=2.9", "logfire>=2.0",
+        # agent.settings calls load_dotenv() at import, so every container needs it.
+        "python-dotenv>=1.0",
+    )
     .add_local_python_source("agent")
 )
 
@@ -58,16 +62,7 @@ sandbox_image = modal.Image.debian_slim(python_version="3.12")
 # --------------------------------------------------------------------------- 1. serve
 
 
-@app.function(
-    image=vllm_image,
-    gpu=GPU,
-    volumes={"/root/.cache/huggingface": hf_cache, "/root/.cache/vllm": vllm_cache},
-    scaledown_window=15 * 60,
-    timeout=60 * 60,
-)
-@modal.concurrent(max_inputs=32)
-@modal.web_server(port=VLLM_PORT, startup_timeout=15 * 60)
-def serve() -> None:
+def _serve() -> None:
     """OpenAI-compatible endpoint. Point the Gateway's BYOK provider here."""
     import subprocess
 
@@ -81,6 +76,23 @@ def serve() -> None:
             "--gpu-memory-utilization", "0.90",
         ]
     )
+
+
+# Registering a GPU function needs a payment method on the workspace, and that one
+# failure aborts the ENTIRE deploy -- taking the fan-out and sandbox down with it,
+# neither of which needs a GPU. PONDER_SERVE_GPU=0 ships everything else meanwhile.
+SERVE_GPU = os.environ.get("PONDER_SERVE_GPU", "1") not in {"0", "off", "false"}
+
+if SERVE_GPU:
+    serve = app.function(
+        image=vllm_image,
+        gpu=GPU,
+        volumes={"/root/.cache/huggingface": hf_cache, "/root/.cache/vllm": vllm_cache},
+        scaledown_window=15 * 60,
+        timeout=60 * 60,
+    )(modal.concurrent(max_inputs=32)(
+        modal.web_server(port=VLLM_PORT, startup_timeout=15 * 60)(_serve)
+    ))
 
 
 # --------------------------------------------------------------------------- 2. fan-out

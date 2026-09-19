@@ -48,10 +48,11 @@ Measured over a 40-task queue (`agent/tasks.jsonl`, `artifacts/frontier.json`):
 |---|---|---|---|---|
 | always-cheap | 67% | 2,317 | 32 | 65% |
 | always-deep | 89% | 182,377 | 2,508 | 67% |
-| **ponder** | **89%** | **89,283** | **1,239** | **82%** |
+| **ponder** | **89%** | **62,618** | **869** | **83%** |
 
-Ponder holds always-deep's high-stakes accuracy on **51% of the compute**, and 82% of the
-errors it does make are on things like a lily-pad riddle.
+Ponder holds always-deep's high-stakes accuracy on **34% of the compute**, and 83% of the
+errors it does make are on things like a lily-pad riddle. Triage in that run is the live
+`gemini-3.6-flash` judge, scoring from the prompt text alone.
 
 ---
 
@@ -139,10 +140,16 @@ Modal is load-bearing here, not hosting: delete the fan-out and the deep path st
 
 ### Gemini Flash — optional triage judge
 
-`agent/triage.py` ships a heuristic scorer and a drop-in `gemini-2.5-flash` judge behind the
-same interface. Set `GEMINI_API_KEY` and it takes over; unset, the heuristic runs. Triage
-sees **only the prompt** — never the dataset's `stakes_tag` or `hardness`, which are held out
-for scoring error placement.
+`agent/triage.py` ships a heuristic scorer and a drop-in Gemini judge behind the same
+interface. Set `GEMINI_API_KEY` and it takes over; unset, the heuristic runs. `GEMINI_MODEL`
+pins the judge (default `gemini-3.6-flash`) — Google retires these faster than we rebuild,
+and `gemini-2.5-flash` is already closed to new keys. Triage sees **only the prompt** — never
+the dataset's `stakes_tag` or `hardness`, which are held out for scoring error placement.
+
+The judge earns its place: swapping the heuristic for Gemini cut ponder's spend from 51% of
+always-deep to **34%** with *identical* high-stakes accuracy (16/18), because it escalates
+fewer tasks and still misses none of the expensive ones. It finds the money shot unaided —
+on the 24 kg dosing task it returns difficulty 0.10, stakes 0.80.
 
 ---
 

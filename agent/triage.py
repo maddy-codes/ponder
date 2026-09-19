@@ -124,7 +124,7 @@ def gemini_triage(prompt: str) -> Triage:
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={settings.gemini_api_key}"
+        f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
     )
     body = {
         "contents": [{"parts": [{"text": _GEMINI_PROMPT + prompt}]}],
@@ -138,7 +138,7 @@ def gemini_triage(prompt: str) -> Triage:
         difficulty=round(float(data["difficulty"]), 3),
         stakes=round(float(data["stakes"]), 3),
         rationale=str(data.get("rationale", ""))[:120],
-        source="gemini-2.5-flash",
+        source=settings.gemini_model,
     )
 
 
