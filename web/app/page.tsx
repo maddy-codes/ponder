@@ -12,6 +12,7 @@ import { StakesAccuracyChart } from "@/components/charts/stakes-accuracy-chart";
 import { EvidenceBar } from "@/components/evidence-bar";
 import { Panel, SectionHeading, Stat } from "@/components/primitives";
 import { QueueList } from "@/components/queue-list";
+import { RuleEditor } from "@/components/rule-editor";
 import { RuleLedger } from "@/components/rule-ledger";
 import { SiteHeader } from "@/components/site-header";
 import { TaskDetail } from "@/components/task-detail";
@@ -231,6 +232,15 @@ export default function MissionControl() {
               <RuleLedger rows={rules} activeRule={ruleFilter} onPick={setRuleFilter} />
             </div>
           </div>
+        </section>
+
+        {/* ── Policy ───────────────────────────────────────────────────── */}
+        <section className="space-y-3">
+          <SectionHeading
+            title="Policy"
+            description="The named rules themselves — authored here, not in the code. Each one sets how hard to think, whether the answer is executed to verify it, and which guardrails it must clear."
+          />
+          <RuleEditor />
         </section>
 
         {/* ── Baselines ────────────────────────────────────────────────── */}

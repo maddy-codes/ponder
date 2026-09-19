@@ -23,6 +23,14 @@ export default defineSchema({
     ),
     sandboxRan: v.boolean(),
     sandboxPassed: v.union(v.boolean(), v.null()),
+    // Guardrails the matched rule demanded, and how they ruled on the answer.
+    // `guardrailEscalated` means a trip bought deep compute instead of a refusal.
+    guardrails: v.optional(v.array(v.string())),
+    guardrailVerdicts: v.optional(
+      v.array(v.object({ name: v.string(), outcome: v.string(), detail: v.string() }))
+    ),
+    guardrailEscalated: v.optional(v.boolean()),
+    guardrailBlocked: v.optional(v.boolean()),
     answer: v.union(v.string(), v.null()),
     correct: v.union(v.boolean(), v.null()),
     latencyMs: v.number(),

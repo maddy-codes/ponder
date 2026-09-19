@@ -71,6 +71,27 @@ export const ruleVerdict = (e: TaskEvent) =>
       ? "named rule overrode the score"
       : "named rule confirmed the score";
 
+/**
+ * What the guardrail layer did to this answer.
+ *
+ * An escalation is called out first because it is the part a reader would otherwise
+ * miss: the compute on this receipt is higher than the rule alone asked for, and this
+ * line is the reason why.
+ */
+export const guardrailOutcome = (e: TaskEvent) => {
+  if (!e.guardrails?.length) return "no guardrails required by the matched rule";
+  if (e.guardrail_blocked) return "BLOCKED — the answer was withheld";
+  const failed = (e.guardrail_verdicts ?? []).filter((v) => v.outcome !== "allow");
+  if (e.guardrail_escalated) {
+    return failed.length
+      ? `tripped, escalated to deep, and ${failed.map((v) => v.name).join(", ")} still failed`
+      : "tripped on the cheap answer, escalated to deep, then all guardrails passed";
+  }
+  return failed.length
+    ? `failed: ${failed.map((v) => v.name).join(", ")}`
+    : "all guardrails passed";
+};
+
 export const sandboxOutcome = (e: TaskEvent) =>
   !e.sandbox_ran
     ? "not run"
@@ -138,6 +159,14 @@ export function receiptMarkdown(r: Receipt): string {
   L.push("", "## Verification");
   head();
   row("Sandbox", sandboxOutcome(e));
+  row("Guardrails required", e.guardrails?.length ? e.guardrails.map((g) => `\`${g}\``).join(", ") : "none");
+  if (e.guardrail_verdicts?.length) {
+    row("Guardrail outcome", guardrailOutcome(e));
+    L.push("", "| Guardrail | Verdict | Detail |", "| --- | --- | --- |");
+    e.guardrail_verdicts.forEach((v) =>
+      L.push(`| \`${v.name}\` | ${v.outcome} | ${(v.detail || "—").replaceAll("|", "\\|")} |`)
+    );
+  }
 
   L.push("", "## Result");
   head();
@@ -180,6 +209,7 @@ export function receiptJson(r: Receipt): string {
         task: bareId(e),
         rule_verdict: ruleVerdict(e),
         sandbox: sandboxOutcome(e),
+        guardrails: guardrailOutcome(e),
         grade: gradeOutcome(e),
       },
       event: e,

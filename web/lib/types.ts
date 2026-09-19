@@ -1,5 +1,12 @@
 export type Sample = { status: string; tokens: number; gpu_seconds: number };
 
+/** One named guardrail's verdict on the answer that was about to be returned. */
+export type GuardrailVerdict = {
+  name: string;
+  outcome: "allow" | "retry" | "block" | "replace";
+  detail: string;
+};
+
 /** Mirrors agent/events.py::TaskEvent, verbatim off events.jsonl. */
 export type TaskEvent = {
   id: string;
@@ -15,6 +22,12 @@ export type TaskEvent = {
   samples: Sample[];
   sandbox_ran: boolean;
   sandbox_passed: boolean | null;
+  /** guardrails the matched rule demanded (agent/rules.json -> then.guardrails) */
+  guardrails?: string[];
+  guardrail_verdicts?: GuardrailVerdict[];
+  /** a guardrail trip bought deep compute rather than returning a refusal */
+  guardrail_escalated?: boolean;
+  guardrail_blocked?: boolean;
   answer: string | null;
   correct: boolean | null;
   latency_ms: number;

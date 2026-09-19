@@ -10,6 +10,7 @@ import {
   FlaskConical,
   Hash,
   Scale,
+  ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
 import {
@@ -195,6 +196,40 @@ export function TaskDetail({
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                 {event.rule_reason}
               </p>
+              {(event.guardrails?.length ?? 0) > 0 && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2.5">
+                  <ShieldCheck className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="mr-0.5 text-[11px] text-muted-foreground">
+                    Answer had to clear
+                  </span>
+                  {event.guardrails?.map((name) => {
+                    const verdict = event.guardrail_verdicts?.find((v) => v.name === name);
+                    const failed = verdict && verdict.outcome !== "allow";
+                    return (
+                      <span
+                        key={name}
+                        title={verdict?.detail || undefined}
+                        className={cn(
+                          "rounded-md px-1.5 py-0.5 font-mono text-[10px]",
+                          failed ? "bg-miss/12 text-miss" : "bg-ok/12 text-ok"
+                        )}
+                      >
+                        {name}
+                      </span>
+                    );
+                  })}
+                  {event.guardrail_escalated && (
+                    <span className="ml-auto rounded-md bg-deep/12 px-1.5 py-0.5 text-[11px] font-medium text-deep">
+                      tripped → escalated to deep
+                    </span>
+                  )}
+                  {event.guardrail_blocked && (
+                    <span className="ml-auto rounded-md bg-miss/12 px-1.5 py-0.5 text-[11px] font-medium text-miss">
+                      answer withheld
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5">
