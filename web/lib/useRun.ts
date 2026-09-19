@@ -101,7 +101,21 @@ export function useRun(speed: number, playing: boolean, strategy = "ponder") {
    * the only difference is that it was emitted a second ago rather than last night.
    */
   const inject = useCallback((event: TaskEvent) => {
-    setInjected((prev) => (prev.some((e) => e.id === event.id) ? prev : [...prev, event]));
+    let isNew = true;
+    setInjected((prev) => {
+      const at = prev.findIndex((e) => e.id === event.id);
+      if (at === -1) return [...prev, event];
+      // Already here: the bench streams several snapshots of the same task, and
+      // Convex can deliver the final one too. Update it in place and leave the
+      // playhead alone -- re-seeking on every snapshot would restart the animation
+      // mid-flight and, once the last one landed, push the index past the end so
+      // the console had no current task at all.
+      isNew = false;
+      const next = [...prev];
+      next[at] = event;
+      return next;
+    });
+    if (!isNew) return;
     setIndex(queueLen.current);
     setStage("thinking");
     setSamplesLit(0);

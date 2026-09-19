@@ -10,6 +10,8 @@ import {
   RuleTag,
   VerdictTag,
 } from "@/components/primitives";
+import { ExportMenu } from "@/components/export-menu";
+import { ReceiptDialog } from "@/components/receipt-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -35,6 +37,11 @@ const COLUMNS: { key: Key; label: string; numeric?: boolean; className?: string 
   { key: "gpu", label: "GPU", numeric: true },
   { key: "verdict", label: "Result" },
 ];
+
+const describe = (query: string, rule: string | null) =>
+  [rule ? `rule ${rule}` : null, query.trim() ? `search "${query.trim()}"` : null]
+    .filter(Boolean)
+    .join(", ") || "all tasks";
 
 const valueOf = (e: TaskEvent, key: Key): string | number => {
   switch (key) {
@@ -121,6 +128,7 @@ export function TaskTable({
             {ruleFilter} ✕
           </button>
         )}
+        <ExportMenu view={rows} all={events} viewLabel={describe(query, ruleFilter)} />
         <div className="relative w-52">
           <Search
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -173,6 +181,9 @@ export function TaskTable({
                     </TableHead>
                   );
                 })}
+                <TableHead className="w-10">
+                  <span className="sr-only">Receipt</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -220,6 +231,9 @@ export function TaskTable({
                   </TableCell>
                   <TableCell>
                     <VerdictTag correct={e.correct} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <ReceiptDialog event={e} trigger="icon" />
                   </TableCell>
                 </TableRow>
               ))}

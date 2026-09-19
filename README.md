@@ -194,7 +194,7 @@ Going live:
 cp .env.example .env            # fill in Logfire, Gateway, Modal, Convex
 modal deploy agent/modal_app.py # endpoint URL -> MODEL_ENDPOINT_URL + Gateway BYOK provider
 modal run agent/modal_app.py    # smoke: proves fan-out and sandbox are real
-npx convex dev                  # push convex/schema.ts
+cd web && npx convex dev        # push web/convex/schema.ts + live subscription
 PONDER_MODE=live uv run python scripts/prove_rule.py --task s01
 ```
 
@@ -205,13 +205,23 @@ Four zones — Queue, Effort view (triage meters, the matched domain rule, the G
 samples lighting up, the sandbox tick), Cost-vs-accuracy frontier + live spend against an
 always-deep counterfactual, and an Evidence strip with the two Logfire links and the token delta.
 
-**Ask Ponder** — the input box above the grid takes one task, runs it through `POST /api/ask` →
-`agent.ask` → the same `run_task` the batch queue uses, and drops the resulting event into the
-same Queue and Effort view. No special-casing: it triages, matches a rule, spends, verifies and
-emits its one TaskEvent like any other task. Type a financial question that looks trivial and
-watch the rule overrule the score. (In stub mode the model's *words* are the one thing the
-simulator cannot supply, so the answer field says so; the decision, the rule, the fan-out width
-and the token and GPU numbers are all real.)
+**The Bench** — the docked right-hand rail takes one task, runs it through `POST /api/ask` →
+`agent.ask --stream` → the same `run_task` the batch queue uses, and drops the resulting event
+into the same Queue and Effort view. No special-casing: it triages, matches a rule, spends,
+verifies and emits its one TaskEvent like any other task.
+
+It is a rail rather than a box above the grid because a deep task takes real time — the fan-out
+is N actual containers and the sandbox is an actual execution — so the run has to be legible
+while it happens. `--stream` prints one NDJSON snapshot per *real* stage transition and the
+bench renders those: triage lands first with difficulty and stakes, the matched rule and the
+budget with it, then the sample bar fills in as each container returns, then the sandbox, then
+the answer. The elapsed clock runs throughout. Nothing on that rail is synthesised — every line
+reads a field the streamed `TaskEvent` already carries, so the renderer invariant holds for the
+live path too.
+
+Type a financial question that looks trivial and watch the rule overrule the score. (In stub
+mode the model's *words* are the one thing the simulator cannot supply, so the answer field says
+so; the decision, the rule, the fan-out width and the token and GPU numbers are all real.)
 
 `events.jsonl` is written on every run regardless of what else is up, and the dashboard's
 Replay mode plays it back. The demo never depends on a live GPU.
@@ -222,7 +232,7 @@ Replay mode plays it back. The demo never depends on a live GPU.
 agent/    settings, events (the TaskEvent contract + 3-sink emitter), tasks, triage, budget,
           rules (named domain rules), ask (the ponder() entry point), worker (stub | Gateway),
           aggregate, verify, sandbox, grader, loop, baselines, modal_app
-convex/   schema.ts (taskEvents) + events.ts (upsert/list)
+web/convex/  schema.ts (taskEvents) + events.ts (upsert/list/clear)
 web/      Next.js App Router · Mission Control
 scripts/  prove_rule.py (Pydantic evidence), build_tasks.py
 docs/     IMPLEMENTATION_PLAN.md   ·   PONDER_BUILD.md is the original brief

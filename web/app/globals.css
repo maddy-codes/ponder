@@ -212,3 +212,87 @@
 .breathe {
   animation: breathe 1.6s ease-in-out infinite;
 }
+
+/* Printing a receipt has to produce an audit document, not a screenshot of the app.
+   Two things have to happen: everything that is not the receipt goes away entirely
+   (`visibility: hidden` still occupies layout, which paginates into blank sheets),
+   and every wrapper between <body> and the receipt is flattened — on screen the
+   dialog is centred, width-capped and scroll-clipped, none of which survives paper. */
+@media print {
+  :root,
+  .dark {
+    --background: #ffffff;
+    --foreground: #101114;
+    --card: #ffffff;
+    --card-foreground: #101114;
+    --popover: #ffffff;
+    --popover-foreground: #101114;
+    --muted: #f4f4f6;
+    --muted-foreground: #4b4d55;
+    --border: #d6d7dc;
+    --rule: #2f2ad6;
+    --miss: #b4232f;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  /* The dialog is portalled to <body>, so keep only the branch holding the receipt. */
+  body > *:not(:has([data-receipt])) {
+    display: none !important;
+  }
+
+  body *:has([data-receipt]) {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    /* Tailwind v4 centres the dialog with the standalone `translate` property, which
+       `transform: none` does not reset — without this the receipt prints half a page
+       to the left. */
+    transform: none !important;
+    translate: none !important;
+    rotate: none !important;
+    scale: none !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+
+  [data-slot="dialog-overlay"] {
+    display: none !important;
+  }
+
+  [data-receipt] {
+    padding: 0 !important;
+  }
+
+  /* Tables stay whole; sections are allowed to split, or a long answer leaves half
+     a blank page behind it. */
+  [data-receipt] table {
+    break-inside: avoid;
+  }
+
+  /* Print the ink mark whatever theme the screen was in. */
+  [data-receipt] [data-logo="light"] {
+    display: block !important;
+  }
+  [data-receipt] [data-logo="dark"] {
+    display: none !important;
+  }
+}

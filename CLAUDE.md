@@ -39,8 +39,28 @@ items.
 5. **The dashboard is a pure renderer.** Every panel reads fields that `TaskEvent` already carries;
    all aggregation lives in `web/lib/derive.ts` as pure functions over `TaskEvent[]`.
    If a panel would need new backend work, cut the panel.
+   This holds for the live path too: the Bench rail renders `agent.ask --stream`, which is the
+   loop's existing `Emitter.progress()` calls echoed to stdout as NDJSON. A stage appears
+   because the agent reached it — never because the client guessed, timed out, or interpolated.
+   The last streamed line is the durable `TaskEvent`; there is still exactly one of those.
    It is also *navigable*: any task is clickable from the queue, the decision map or the task log,
    and opens in the console detail pane. Clicking never mutates the recording.
+
+## Audit output
+
+`TaskEvent` is the audit record, so both audit surfaces are pure serialisations of it — no route,
+no recomputation, nothing inferred.
+
+- **Log export** (`lib/export.ts`, the Export menu on the task log): CSV (21 audit columns, one row
+  per task, BOM'd for Excel), JSON with an export envelope, and JSONL identical in shape to
+  `events.jsonl`. Exports either the filtered view or the whole run.
+- **Decision receipt** (`lib/receipt.ts`, `components/receipt-dialog.tsx`): a per-exchange document
+  — request, triage, policy (which rule fired and whether it overrode the score), compute
+  committed, verification, result, provenance. It carries a SHA-256 fingerprint of the canonical
+  event, so the receipt number and digest are stable for a given record and a changed record shows
+  a different digest. Copy as Markdown, save `.md`/`.json`, or print — the print stylesheet in
+  `globals.css` drops the app and lays the receipt out on white. A receipt for a task whose
+  `status` is not `done` is stamped **provisional** rather than blocked.
 6. **No auth, no Clerk, no services outside the locked stack.** Single user, single page.
 
 ## Architecture
@@ -114,11 +134,12 @@ an MoE model risks sitting unscheduled.
 ```
 agent/    loop.py triage.py rules.py ask.py gateway.py modal_app.py events.py grader.py
           baselines.py tasks.jsonl
-convex/   schema.ts events.ts
+web/convex/ schema.ts events.ts   # inside web/: the Next client imports _generated
 web/      app/{page.tsx,layout.tsx,globals.css} app/api/ask/route.ts
           lib/{types,derive,useRun}.ts       # derive.ts holds every aggregate the panels read
           components/{site-header,theme-toggle,theme-provider,primitives}
-          components/{queue-list,task-detail,task-table,rule-ledger,ask-box,evidence-bar}
+          components/{queue-list,task-detail,task-table,rule-ledger,bench,evidence-bar}
+          components/{receipt-dialog,export-menu}   lib/{receipt,export}.ts
           components/charts/{spend,budget,decision-map,frontier,stakes-accuracy}-chart.tsx
           components/ui/*   # shadcn/ui (base-nova, Base UI primitives) -- owned source, edit freely
 events.jsonl   # recorded known-good run (Replay)
@@ -138,7 +159,7 @@ cd web && npm run dev                                   # Mission Control at :30
 
 modal deploy agent/modal_app.py                         # GPU endpoint + fan-out + sandbox
 modal run agent/modal_app.py                            # smoke test both
-npx convex dev                                          # push convex/schema.ts
+cd web && npx convex dev                                # push web/convex + codegen
 ```
 
 `--fresh` truncates `events.jsonl`. The dashboard reads whatever is in it, so a baselines run

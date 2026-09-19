@@ -30,7 +30,7 @@ export function SiteHeader({
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-[1560px] items-center gap-3 px-5">
+      <div className="mx-auto flex h-14 max-w-[1900px] items-center gap-3 px-5">
         {/* Two files rather than a CSS filter: inverting would flip the brand blue too. */}
         <Image
           src="/ponder-lockup.png"

@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import re
+import sys
 import time
 from dataclasses import dataclass
 
-from agent.events import TaskEvent
+from agent.events import Emitter, TaskEvent
 from agent.loop import run_task
 from agent.tasks import Task
 
@@ -99,12 +101,60 @@ def ponder(prompt: str, task_id: str | None = None) -> PonderResult:
     return asyncio.run(ponder_async(prompt, task_id))
 
 
+class StreamEmitter(Emitter):
+    """Echo every stage the loop already publishes as one NDJSON line on stdout.
+
+    `run_task` calls `progress()` at each REAL transition -- once the triage scores
+    and the budget decision exist, once the fan-out has landed with its per-sample
+    token and GPU numbers, and again around the sandbox. Mission Control's bench
+    renders those lines, so a 50-second deep task reads as working rather than dead.
+
+    This invents nothing and adds no second pipeline: the same TaskEvent still goes
+    to the same three sinks through `super()`. Stdout is just a fourth reader, and
+    the last line printed is always the final event -- so a caller that only wants
+    the result can still take the last line and ignore the rest.
+    """
+
+    def progress(self, event: TaskEvent) -> None:
+        super().progress(event)
+        self._line(event, final=False)
+
+    def emit(self, event: TaskEvent) -> TaskEvent:
+        emitted = super().emit(event)
+        self._line(emitted, final=True)
+        return emitted
+
+    @staticmethod
+    def _line(event: TaskEvent, final: bool) -> None:
+        # Totals are rolled up on the durable emit only, so do it on a copy here to
+        # give the bench a running count without disturbing the real event.
+        snapshot = event.model_copy(deep=True)
+        snapshot.roll_up()
+        payload = snapshot.model_dump()
+        payload["final"] = final
+        sys.stdout.write(json.dumps(payload) + "\n")
+        sys.stdout.flush()
+
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Ponder a single prompt.")
     ap.add_argument("prompt", help="the task to ponder")
     ap.add_argument("--id", help="override the generated task id")
     ap.add_argument("--json", action="store_true", help="print the TaskEvent as JSON (nothing else)")
+    ap.add_argument(
+        "--stream",
+        action="store_true",
+        help="emit one NDJSON line per stage as it happens; the last line is the final event",
+    )
     args = ap.parse_args()
+
+    if args.stream:
+        # Same run_task, same sinks -- only the extra stdout reader differs.
+        asyncio.run(
+            run_task(as_task(args.prompt, args.id), strategy="ponder", emitter=StreamEmitter())
+        )
+        return
 
     result = ponder(args.prompt, args.id)
     print(result.event.model_dump_json() if args.json else result)

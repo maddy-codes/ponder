@@ -2,8 +2,9 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Coins, Cpu, FlaskConical, Layers, Scale, TriangleAlert } from "lucide-react";
-import { AskBox } from "@/components/ask-box";
+import { Bench } from "@/components/bench";
 import { BudgetChart } from "@/components/charts/budget-chart";
+import { ConvexLive } from "@/components/convex-live";
 import { DecisionMap } from "@/components/charts/decision-map";
 import { FrontierChart } from "@/components/charts/frontier-chart";
 import { SpendChart } from "@/components/charts/spend-chart";
@@ -96,7 +97,8 @@ export default function MissionControl() {
         total={state.total}
       />
 
-      <main className="mx-auto max-w-[1560px] space-y-8 px-5 py-6">
+      <div className="mx-auto flex max-w-[1900px] flex-col gap-5 px-5 py-6 xl:flex-row xl:items-start">
+        <main className="min-w-0 flex-1 space-y-8">
         {state.error && (
           <Alert className="border-deep/40 bg-deep/8">
             <TriangleAlert className="text-deep" />
@@ -157,13 +159,9 @@ export default function MissionControl() {
           </div>
         </section>
 
-        <AskBox
-          onEvent={(event) => {
-            setPlaying(true);
-            setSelectedId(null);
-            inject(event);
-          }}
-        />
+        {/* Live tasks from any agent run, via Convex. No-ops when unconfigured. */}
+
+        <ConvexLive onEvent={inject} />
 
         {/* ── Console ──────────────────────────────────────────────────── */}
         <section ref={consoleRef} className="scroll-mt-20 space-y-3">
@@ -282,7 +280,29 @@ export default function MissionControl() {
             onClearRuleFilter={() => setRuleFilter(null)}
           />
         </section>
-      </main>
+        </main>
+
+        {/*
+          The bench is docked, not stacked: a live answer used to be dropped into a
+          replay that was still animating, so it was one frame in a scrolling
+          recording. Here it holds still next to the dashboard it feeds.
+          `order-first` keeps it on top on narrow screens, where there is no rail.
+        */}
+        <aside className="order-first xl:order-none xl:w-[380px] xl:shrink-0 2xl:w-[420px]">
+          {/* Needs an explicit height at every width: the panel is a flex column whose
+              scroll area fills the remainder, and `flex-1` has nothing to claim against
+              an auto-height parent. Below xl it is a capped block, above it a full rail. */}
+          <div className="h-[min(72vh,620px)] xl:sticky xl:top-[72px] xl:h-[calc(100vh-88px)]">
+            <Bench
+              onEvent={(event) => {
+                setPlaying(true);
+                setSelectedId(null);
+                inject(event);
+              }}
+            />
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

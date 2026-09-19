@@ -20,6 +20,7 @@ import {
   PanelHeader,
   VerdictTag,
 } from "@/components/primitives";
+import { ReceiptDialog } from "@/components/receipt-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { fmtGpu, fmtTokens } from "@/lib/derive";
@@ -132,6 +133,7 @@ export function TaskDetail({
           </span>
         )}
         <BudgetTag budget={event.budget} />
+        <ReceiptDialog event={event} />
       </PanelHeader>
 
       <ScrollArea className="min-h-0 flex-1">

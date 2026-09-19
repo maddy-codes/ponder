@@ -2,13 +2,14 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import type { TaskEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const ROOT = path.join(process.cwd(), "..");
-const TIMEOUT_MS = 90_000;
+/** A deep task fans out N containers and then executes a sandbox; measured range is
+ *  8-55s, so the old 90s ceiling was close enough to kill real work. */
+const TIMEOUT_MS = 240_000;
 
 /** The venv interpreter if it is there, otherwise let uv resolve one. */
 function interpreter(): { cmd: string; args: string[] } {
@@ -18,12 +19,20 @@ function interpreter(): { cmd: string; args: string[] } {
 }
 
 /**
- * Ponder one typed prompt.
+ * Ponder one typed prompt, streaming each stage as it happens.
  *
- * This shells out to the same `agent.ask` entry point the README documents, which
- * runs the same `run_task` the batch queue runs. There is no second pipeline and no
- * special-casing: the task triages, matches rules, spends, verifies and emits its one
- * TaskEvent to all three sinks, so it lands in events.jsonl alongside the batch.
+ * This shells out to the same `agent.ask` entry point the README documents, which runs
+ * the same `run_task` the batch queue runs. There is no second pipeline: the task
+ * triages, matches rules, spends, verifies and emits its one TaskEvent to all three
+ * sinks, so it lands in events.jsonl alongside the batch.
+ *
+ * `--stream` makes the agent print one NDJSON TaskEvent per real stage transition
+ * (triage+budget decided, fan-out landed, verifying, done) and we forward those
+ * verbatim. Nothing is synthesised here — a stage appears when the agent reached it,
+ * which is the point: a 50-second deep task has to look like work, not like a hang.
+ *
+ * The response is NDJSON, one snapshot per line, and the line carrying `final: true`
+ * is the durable TaskEvent. An error arrives as a line carrying `error`.
  */
 export async function POST(request: Request) {
   let prompt = "";
@@ -39,49 +48,88 @@ export async function POST(request: Request) {
 
   const { cmd, args } = interpreter();
   // Argument array, never a shell string -- the prompt is user input.
-  const child = spawn(cmd, [...args, "-m", "agent.ask", prompt, "--json"], {
+  const child = spawn(cmd, [...args, "-m", "agent.ask", prompt, "--stream"], {
     cwd: ROOT,
     env: { ...process.env, PYTHONUNBUFFERED: "1" },
   });
 
-  const out: Buffer[] = [];
-  const err: Buffer[] = [];
-  child.stdout.on("data", (c) => out.push(c));
-  child.stderr.on("data", (c) => err.push(c));
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+      let sawFinal = false;
+      let buffer = "";
+      const errChunks: string[] = [];
 
-  const code: number | null = await new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve(null);
-    }, TIMEOUT_MS);
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve(-1);
-    });
-    child.on("close", (c) => {
-      clearTimeout(timer);
-      resolve(c);
-    });
+      const send = (obj: unknown) => {
+        if (!closed) controller.enqueue(encoder.encode(`${JSON.stringify(obj)}\n`));
+      };
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      };
+
+      const timer = setTimeout(() => {
+        send({ error: `the agent took longer than ${TIMEOUT_MS / 1000}s` });
+        child.kill("SIGKILL");
+        finish();
+      }, TIMEOUT_MS);
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        // Forward only whole lines; a split NDJSON line is not yet parseable.
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event?.final) sawFinal = true;
+            send(event);
+          } catch {
+            // The emitter is free to log above the stream; skip anything not NDJSON.
+          }
+        }
+      });
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        errChunks.push(chunk.toString());
+      });
+
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        send({ error: `could not start the agent: ${e.message}` });
+        finish();
+      });
+
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (!sawFinal) {
+          const stderr = errChunks.join("").trim();
+          send({
+            error: stderr.split("\n").slice(-3).join(" ") || `the agent exited with ${code}`,
+          });
+        }
+        finish();
+      });
+
+      // The browser navigated away or the user cancelled: stop burning GPU for it.
+      request.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        child.kill("SIGKILL");
+        finish();
+      });
+    },
   });
 
-  const stderr = Buffer.concat(err).toString().trim();
-  if (code === null) {
-    return NextResponse.json({ error: `the agent took longer than ${TIMEOUT_MS / 1000}s` }, { status: 504 });
-  }
-  if (code !== 0) {
-    return NextResponse.json(
-      { error: stderr.split("\n").slice(-3).join(" ") || `agent exited with ${code}` },
-      { status: 500 }
-    );
-  }
-
-  // --json prints the TaskEvent and nothing else, but the emitter is free to log
-  // above it, so take the last non-empty line.
-  const lines = Buffer.concat(out).toString().split("\n").filter((l) => l.trim());
-  try {
-    const event: TaskEvent = JSON.parse(lines[lines.length - 1]);
-    return NextResponse.json({ event });
-  } catch {
-    return NextResponse.json({ error: "the agent produced no TaskEvent" }, { status: 500 });
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      // Without this a proxy can sit on the stream and hand it over in one piece,
+      // which would put us right back where we started.
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
