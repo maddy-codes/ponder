@@ -15,6 +15,8 @@ import re
 import time
 from dataclasses import dataclass
 
+from pydantic_ai_harness.guardrails import OutputBlocked
+
 from agent.settings import settings
 from agent.tasks import Task
 
@@ -26,6 +28,9 @@ class WorkerResult:
     gpu_seconds: float
     ok: bool = True
     error: str = ""
+    # True when a blocking guardrail withheld this sample. Distinct from `ok=False`:
+    # the model answered, policy refused to pass the answer on.
+    blocked: bool = False
 
 
 # --------------------------------------------------------------------------- stub
@@ -192,24 +197,37 @@ def _gateway_model(rule_id: str | None = None):
     return OpenAIChatModel(_model_name(), provider=provider)
 
 
-def _agent_for(rule_id: str):
-    """One Pydantic AI agent per Gateway rule.
+def _agent_for(rule_id: str, guardrails: tuple[str, ...] = ()):
+    """One Pydantic AI agent per (Gateway rule, guardrail chain).
 
     The rule is the actuator: effort is selected by asking the Gateway for a rule, not
-    by branching in this file.
+    by branching in this file. The same rule also names the guardrails, and those are
+    attached here as first-party `capabilities` so the framework -- not our loop --
+    redacts the prompt and turns a failed output check into a real `ModelRetry`.
+
+    Keyed by both, because two tasks can share a Gateway rule while their domain rules
+    demand different checks; caching on rule_id alone would silently hand one task the
+    other's guardrails.
     """
-    if rule_id in _agents:
-        return _agents[rule_id]
+    key = f"{rule_id}|{','.join(guardrails)}"
+    if key in _agents:
+        return _agents[key]
 
     from pydantic_ai import Agent
 
+    from agent.guardrails import capabilities
+
     system = _CHEAP_SYSTEM if rule_id == settings.rule_cheap else _DEEP_SYSTEM
-    agent = Agent(_gateway_model(rule_id), system_prompt=system)
-    _agents[rule_id] = agent
+    agent = Agent(
+        _gateway_model(rule_id),
+        system_prompt=system,
+        capabilities=capabilities(guardrails),
+    )
+    _agents[key] = agent
     return agent
 
 
-async def _run(agent, prompt: str, ms: dict | None):
+async def _run(agent, prompt: str, ms: dict | None, caps: list | None = None):
     """Run the agent, and fall back once if the endpoint rejects the effort parameter.
 
     A served model that has never seen `reasoning_effort` returns a 400 rather than
@@ -218,16 +236,24 @@ async def _run(agent, prompt: str, ms: dict | None):
     load-bearing, so if the endpoint dislikes it we want the error rather than a
     silent downgrade to an unruled call that still looks like it worked.
     """
+    # `capabilities` is a per-run parameter, which is what lets agent/govern.py police an
+    # agent it did not construct: the guardrails ride along with the call instead of
+    # having to be baked into someone else's Agent definition.
+    extra = {"capabilities": caps} if caps else {}
     if not ms:
-        return await agent.run(prompt)
+        return await agent.run(prompt, **extra)
     try:
-        return await agent.run(prompt, model_settings=ms)
+        return await agent.run(prompt, model_settings=ms, **extra)
+    except OutputBlocked:
+        raise
     except Exception as exc:  # pragma: no cover - endpoint dependent
         bare = {k: v for k, v in ms.items() if k == "extra_headers"}
         if bare == ms:
             raise
         print(f"[worker] native effort parameter rejected, retrying without it: {str(exc)[:120]}")
-        return await agent.run(prompt, model_settings=bare) if bare else await agent.run(prompt)
+        if bare:
+            return await agent.run(prompt, model_settings=bare, **extra)
+        return await agent.run(prompt, **extra)
 
 
 def effort_settings(rule_id: str) -> dict:
@@ -270,11 +296,18 @@ def call_settings(rule_id: str) -> dict:
     return out
 
 
-async def gateway_sample(task: Task, rule_id: str, seed: int) -> WorkerResult:
-    agent = _agent_for(rule_id)
+async def gateway_sample(
+    task: Task, rule_id: str, seed: int, guardrails: tuple[str, ...] = ()
+) -> WorkerResult:
+    agent = _agent_for(rule_id, guardrails)
     started = time.perf_counter()
     try:
         result = await _run(agent, task.prompt, call_settings(rule_id))
+    except OutputBlocked as exc:
+        # A blocking guardrail is a policy decision, not a failure to reach the model.
+        # It is reported as its own outcome so the loop can withhold the answer rather
+        # than treat it as a flaky sample and average it away.
+        return WorkerResult("", 0, 0.0, ok=False, error=f"blocked: {str(exc)[:180]}", blocked=True)
     except Exception as exc:  # pragma: no cover - network dependent
         return WorkerResult("", 0, 0.0, ok=False, error=str(exc)[:200])
     elapsed = time.perf_counter() - started
@@ -287,13 +320,17 @@ async def gateway_sample(task: Task, rule_id: str, seed: int) -> WorkerResult:
 # --------------------------------------------------------------------------- entry
 
 
-async def sample(task: Task, budget: str, rule_id: str, seed: int = 0) -> WorkerResult:
+async def sample(
+    task: Task, budget: str, rule_id: str, seed: int = 0, guardrails: tuple[str, ...] = ()
+) -> WorkerResult:
     if settings.live:
-        return await gateway_sample(task, rule_id, seed)
+        return await gateway_sample(task, rule_id, seed, guardrails)
     return await stub_sample(task, budget, seed)
 
 
-async def fan_out(task: Task, budget: str, rule_id: str, n: int) -> list[WorkerResult]:
+async def fan_out(
+    task: Task, budget: str, rule_id: str, n: int, guardrails: tuple[str, ...] = ()
+) -> list[WorkerResult]:
     """Best-of-N.
 
     Live with Modal: the N samples are dispatched across Modal containers
@@ -301,17 +338,21 @@ async def fan_out(task: Task, budget: str, rule_id: str, n: int) -> list[WorkerR
     prize is about. Otherwise they run concurrently through the same seam.
     """
     if n <= 1:
-        return [await sample(task, budget, rule_id, seed=0)]
+        return [await sample(task, budget, rule_id, seed=0, guardrails=guardrails)]
 
     if settings.use_modal:
         try:
             from agent.modal_app import remote_fan_out
 
-            return await remote_fan_out(task, rule_id, n)
+            return await remote_fan_out(task, rule_id, n, guardrails)
         except Exception as exc:  # pragma: no cover
             print(f"[worker] modal fan-out unavailable, running locally: {exc}")
 
-    return list(await asyncio.gather(*(sample(task, budget, rule_id, seed=i) for i in range(n))))
+    return list(
+        await asyncio.gather(
+            *(sample(task, budget, rule_id, seed=i, guardrails=guardrails) for i in range(n))
+        )
+    )
 
 
 # --------------------------------------------------------------------------- verification

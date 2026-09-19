@@ -78,8 +78,11 @@ Task in
 
 `baselines.py` replays the same queue under three strategies — `cheap`, `deep`, `ponder` — to
 produce the frontier. The interesting demo cases are the two that a pure difficulty router gets
-backwards: **high-stakes but easy-looking** (escalate anyway, verify in sandbox) and **low-stakes
-but hard** (deliberately don't spend).
+backwards: **high-stakes but easy-looking** (a one-step dose sum — escalate anyway, verify in
+sandbox) and **low-stakes but hard** (ward rota and stock puzzles — deliberately don't spend).
+The hard/low quadrant is clinically *flavoured* but clinically *harmless* on purpose: it is
+the only way to show the policy reads consequence rather than hospital vocabulary. Scope and
+stakes therefore use separate lexicons — sterilising trays is in scope but not high-stakes.
 
 Split of responsibilities: **the agent is Python** (local or on Modal). **Convex + Next.js are the
 app/transport layer only** — Vercel hosts the frontend, never the agent.
@@ -91,11 +94,78 @@ a product category. Neither connects a **named domain rule** to **how much the m
 verifies before its answer is trusted**. `agent/rules.py` is that connective layer, and it is
 the thing to protect when pitching: without it Ponder reads as difficulty-based routing.
 
+The shipped policy is clinical: `paediatric_dose`, `high_alert_medication`,
+`infusion_rate`, `renal_dose_adjustment`, `dose_dispensing` (escalating), `patient_record`
+(PII-blocking), then `ward_estimate` and `clinical_reference` (deliberately cheap).
+
+**The rules are data.** `agent/rules.json` is the policy; `agent/rules.py` only loads and
+compiles it; Mission Control's Policy panel authors it through `web/app/api/rules/route.ts`,
+which shells out to `python -m agent.rules --json` rather than parsing the file itself — one
+loader, no drift. The loader reloads on mtime, so a saved rule binds on the next task.
+
+A rule has three clauses: `budget` (how hard to think), `sandbox_verify` (whether the answer is
+executed before it is trusted) and `guardrails` (which named checks the answer must clear).
 Named rules match on the prompt only, are declared escalate-first, and **outrank** the numeric
 score; with no match `budget = f(difficulty, stakes)` decides as before. `matched_rule` and
 `rule_reason` on `TaskEvent` are the audit trail, and `rule_reason` names what the score alone
 would have spent whenever the two disagreed. Baselines (`cheap`/`deep`) must never consult the
 rules — `loop.plan()` gates that on `strategy == "ponder"`.
+
+## Guardrails (`agent/guardrails.py`)
+
+The domain is **medication safety**. Guards encode published clinical standards, not
+generic output-quality heuristics:
+
+| guard | on failure | catches |
+|---|---|---|
+| `numeric_answer_present` | retry | a dose question answered in prose |
+| `units_present` | retry | a quantity with no unit |
+| `no_hedging` | retry | "roughly", "I think" — a dose is not an estimate |
+| `safe_dose_notation` | retry | ISMP *Do Not Use* list: `1.0 mg`, `.5 mg`, `10U`, `IU`, `µg`, `QD` |
+| `no_patient_identifiers` | **block** | NHS number (Modulus 11 checked), phone, MRN, DOB, postcode, email |
+| `shows_working` | retry | a deep-budget answer that only asserts a number |
+| `health_topics_only` | **block**, on the **prompt** | anything that is not a clinical question |
+
+First-party Pydantic: `InputGuardrail`/`OutputGuardrail`/`detectors` from
+`pydantic_ai_harness.guardrails`, enforced at two points. Per call they are attached via
+Pydantic AI's `capabilities` parameter (construction-time in `worker._agent_for`, per-run
+in `govern`), so the framework redacts prompts and turns a failed output check into a real
+`ModelRetry`. Then `loop._gate` runs the same guards once over the *aggregated* answer,
+which no per-call guard ever saw.
+
+**A trip escalates rather than refuses.** A guardrail failure on a cheap answer is treated
+as evidence the task was underfunded: the budget goes to deep and the fan-out re-runs
+(`TaskEvent.guardrail_escalated`). Escalation fires at most once and only upward from
+cheap. The two `block` guards are the exceptions, and they block because neither failure
+can be walked back by spending more: a disclosure has already happened, and an off-topic
+question has no clinical answer at any budget.
+
+**Stage matters.** `health_topics_only` runs on the *prompt*, not the answer — scope is an
+input concern, and checking it on the way out means the tokens are already spent. The
+framework enforces it: `InputGuardrail` turns a `block` into `SkipModelRequest`, so the
+model call is never issued (`tests/test_guardrails.py` asserts the call count is zero) and
+the harness emits its own `trace_block` span. `GuardSpec.stage` keeps input guards out of
+the output chain; `check_input()` is the loop-level mirror so the stub worker and any
+supplied `sampler` behave identically.
+
+**Scope is policy-level, not per-rule.** An off-topic prompt matches no clinical rule by
+definition, so it is declared once under `"scope"` in `agent/rules.json` and rides on every
+decision, matched or not (`rules.scope_guardrails()`).
+
+**This layer is not the gateway.** These guards run in our process. Stopping patient data
+from *reaching* a model is a Pydantic AI **Gateway protection**, configured in the Logfire
+UI — see `docs/GATEWAY_GUARDRAILS.md`. The harness's own PII detector does **not** catch UK
+phone or NHS numbers, which is why both layers exist. The hackathon guardrail bonus is
+asking for the gateway one.
+
+## `govern()` (`agent/govern.py`)
+
+The product surface: Ponder's policy in front of a Pydantic AI agent *someone else wrote*. It
+never mutates that agent — guardrails ride on the per-run `capabilities` parameter, effort on
+`model_settings`. It is **not** a second pipeline: it supplies a `sampler` to the same
+`run_task`, so governed calls get the same triage, rules, guardrail gate, sandbox and single
+TaskEvent. `examples/governed_agent.py` is the runnable demo. The `sampler` parameter on
+`run_task` is the only extension seam in the loop — keep it that way.
 
 `agent/ask.py` exposes `ponder(prompt)`: the documented drop-in entry point, used by the README
 snippet, the CLI, and Mission Control's single-task box. It wraps a typed prompt as a `Task` with
@@ -111,7 +181,8 @@ once (Pydantic model → Convex schema → renderer) or not at all.
 
 ## Locked stack — do not substitute
 
-Pydantic AI (agent) · Pydantic AI Gateway (effort rules, BYOK to the Modal endpoint) · Logfire
+Pydantic AI (agent) · Pydantic AI Harness (guardrails) · Pydantic AI Gateway (effort rules,
+BYOK to the Modal endpoint) · Logfire
 (traces + compute numbers) · Modal (GPU model endpoint, `.map()` fan-out, Sandboxes) · Convex
 (transport) · Next.js App Router + Tailwind + Recharts (Mission Control) · plain Python grading.
 The UI layer is shadcn/ui on Tailwind v4 tokens: `components/ui/*` is copied-in source, not a
@@ -132,14 +203,16 @@ an MoE model risks sitting unscheduled.
 ## Layout (target)
 
 ```
-agent/    loop.py triage.py rules.py ask.py gateway.py modal_app.py events.py grader.py
-          baselines.py tasks.jsonl
+agent/    loop.py triage.py rules.py rules.json guardrails.py ask.py govern.py
+          gateway.py modal_app.py events.py grader.py baselines.py tasks.jsonl
+examples/ governed_agent.py
 web/convex/ schema.ts events.ts   # inside web/: the Next client imports _generated
 web/      app/{page.tsx,layout.tsx,globals.css} app/api/ask/route.ts
           lib/{types,derive,useRun}.ts       # derive.ts holds every aggregate the panels read
           components/{site-header,theme-toggle,theme-provider,primitives}
           components/{queue-list,task-detail,task-table,rule-ledger,bench,evidence-bar}
           components/{receipt-dialog,export-menu}   lib/{receipt,export}.ts
+          components/rule-editor.tsx  app/api/rules/route.ts   # the Policy panel
           components/charts/{spend,budget,decision-map,frontier,stakes-accuracy}-chart.tsx
           components/ui/*   # shadcn/ui (base-nova, Base UI primitives) -- owned source, edit freely
 events.jsonl   # recorded known-good run (Replay)

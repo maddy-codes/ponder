@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "note": "Authored medication-safety policy. Edited in Mission Control (Rules tab) or by hand; agent/rules.py only loads and compiles it. Order is precedence: the first enabled rule whose `when` fires decides, so escalating rules come first.",
+  "scope": {
+    "guardrails": [
+      "health_topics_only"
+    ],
+    "note": "Applies to every task, matched rule or not. An off-topic prompt matches no clinical rule by definition, so scope cannot be expressed as one."
+  },
+  "rules": [
+    {
+      "name": "paediatric_dose",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "paediatric",
+          "pediatric",
+          "child",
+          "children",
+          "infant",
+          "neonate",
+          "neonatal",
+          "toddler",
+          "mg/kg",
+          "mg per kg",
+          "mcg/kg",
+          "ml/kg",
+          "body weight",
+          "weight-based"
+        ],
+        "requires_digit": false
+      },
+      "then": {
+        "budget": "deep",
+        "sandbox_verify": true,
+        "guardrails": [
+          "numeric_answer_present",
+          "units_present",
+          "safe_dose_notation",
+          "no_hedging"
+        ]
+      },
+      "reason": "Weight-based paediatric dosing is recomputed and executed before it is trusted. A tenfold slip here is the most-reported fatal medication error, and the arithmetic always looks trivial."
+    },
+    {
+      "name": "high_alert_medication",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "insulin",
+          "heparin",
+          "warfarin",
+          "morphine",
+          "opioid",
+          "fentanyl",
+          "oxycodone",
+          "methotrexate",
+          "chemotherapy",
+          "cytotoxic",
+          "potassium chloride",
+          "digoxin",
+          "vancomycin",
+          "gentamicin",
+          "anticoagulant",
+          "thrombolysis"
+        ],
+        "requires_digit": false
+      },
+      "then": {
+        "budget": "deep",
+        "sandbox_verify": true,
+        "guardrails": [
+          "numeric_answer_present",
+          "units_present",
+          "safe_dose_notation",
+          "no_hedging"
+        ]
+      },
+      "reason": "ISMP high-alert medications carry a disproportionate risk of catastrophic harm when dosed wrong, so they are always deep-verified regardless of how simple the sum looks."
+    },
+    {
+      "name": "infusion_rate",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "infusion",
+          "infuse",
+          "ml/hour",
+          "ml/hr",
+          "mcg/kg/min",
+          "mg/kg/hour",
+          "drip rate",
+          "drops per minute",
+          "syringe driver",
+          "pump rate",
+          "titrate",
+          "bolus",
+          "over 24 hours"
+        ],
+        "requires_digit": false
+      },
+      "then": {
+        "budget": "deep",
+        "sandbox_verify": true,
+        "guardrails": [
+          "numeric_answer_present",
+          "units_present",
+          "safe_dose_notation",
+          "no_hedging"
+        ]
+      },
+      "reason": "Rate calculations compound: a wrong mL/hour runs for hours before anyone notices, so the answer is executed rather than trusted."
+    },
+    {
+      "name": "renal_dose_adjustment",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "creatinine",
+          "creatinine clearance",
+          "crcl",
+          "egfr",
+          "renal",
+          "renally",
+          "dialysis",
+          "kidney function",
+          "hepatic impairment",
+          "liver function",
+          "dose reduction"
+        ],
+        "requires_digit": false
+      },
+      "then": {
+        "budget": "deep",
+        "sandbox_verify": true,
+        "guardrails": [
+          "numeric_answer_present",
+          "units_present",
+          "safe_dose_notation",
+          "no_hedging"
+        ]
+      },
+      "reason": "Organ-impairment adjustment is multi-step and the unadjusted dose is always plausible, which is exactly the failure a single cheap pass produces."
+    },
+    {
+      "name": "dose_dispensing",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "how many ml should",
+          "how many millilitres should",
+          "per 5 ml",
+          "mg per ml",
+          "mg in",
+          "suspension",
+          "supplied as",
+          "drawn up",
+          "drawn-up",
+          "concentration",
+          "strength",
+          "dilute",
+          "reconstitute",
+          "vial contains",
+          "ampoule contains"
+        ],
+        "requires_digit": true
+      },
+      "then": {
+        "budget": "deep",
+        "sandbox_verify": true,
+        "guardrails": [
+          "numeric_answer_present",
+          "units_present",
+          "safe_dose_notation",
+          "no_hedging"
+        ]
+      },
+      "reason": "Converting a prescribed dose in mg into a volume in mL is where strength and volume get transposed. The wrong number is always plausible, so the conversion is executed rather than trusted."
+    },
+    {
+      "name": "patient_record",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "discharge summary",
+          "referral letter",
+          "patient record",
+          "clinic letter",
+          "nhs number",
+          "hospital number",
+          "date of birth",
+          "next of kin",
+          "handover",
+          "write to the gp",
+          "letter to the gp"
+        ],
+        "requires_digit": false
+      },
+      "then": {
+        "budget": "deep",
+        "sandbox_verify": false,
+        "guardrails": [
+          "no_patient_identifiers",
+          "no_hedging"
+        ]
+      },
+      "reason": "Anything shaped like correspondence about a patient is checked for identifiable data before it leaves. A disclosure cannot be walked back, so this guardrail blocks rather than escalating."
+    },
+    {
+      "name": "ward_estimate",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "ballpark",
+          "rough estimate",
+          "quick estimate",
+          "rough figure",
+          "rough total",
+          "order of magnitude",
+          "sanity check",
+          "quick check",
+          "stock order",
+          "how many packs",
+          "roughly how many"
+        ],
+        "requires_digit": true
+      },
+      "then": {
+        "budget": "cheap",
+        "sandbox_verify": false,
+        "guardrails": [
+          "numeric_answer_present",
+          "units_present"
+        ]
+      },
+      "reason": "Ward logistics start cheap on purpose -- but the answer still has to be a usable figure with its unit. If the cheap pass cannot produce one, the guardrail trips and the task escalates to deep rather than returning something unusable."
+    },
+    {
+      "name": "clinical_reference",
+      "enabled": true,
+      "when": {
+        "phrases": [
+          "what does the abbreviation",
+          "what is the chemical symbol",
+          "stands for",
+          "normal range",
+          "reference range",
+          "how many days in",
+          "which vitamin",
+          "what is the generic name"
+        ],
+        "requires_digit": false
+      },
+      "then": {
+        "budget": "cheap",
+        "sandbox_verify": false,
+        "guardrails": []
+      },
+      "reason": "Looking up a fixed clinical fact never warrants deep reasoning."
+    }
+  ]
+}

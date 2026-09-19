@@ -12,3 +12,4 @@ out/
 .convex/
 artifacts/*.png
 gateway-credentials-*.env
+.vercel

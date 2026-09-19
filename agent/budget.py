@@ -25,6 +25,10 @@ class Decision:
     # `reason` above always stays the scored reason, so the two layers stay legible.
     matched_rule: str | None = None
     rule_reason: str | None = None
+    # Named guardrails the matched rule demands the answer clear before it is returned.
+    # Empty when no rule matched: an unpoliced task is checked by the framework's own
+    # guards only, never by domain checks nobody asked for.
+    guardrails: tuple[str, ...] = ()
 
     @property
     def is_money_shot(self) -> bool:

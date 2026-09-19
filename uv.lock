@@ -430,6 +430,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.63.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/72/4ec122befe7c2091ba7370d985cf0a3d4dbeccc2f832898ddb7921b4ab94/json_repair-0.63.4.tar.gz", hash = "sha256:77aa642193d62b02b889e8ce0df33898d3ea87282f0b9d8653f8ce8772c642b4", size = 52906 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a1/ea/1a7b47196b0d03f59a80f5218b2a34160587c84ca8b0bcb56cb4ee93834e/json_repair-0.63.4-py3-none-any.whl", hash = "sha256:0f374f3eee21454aef0a5d72c06b8689b660a1788f80ab392639e3f7d5c5d458", size = 51295 },
+]
+
+[[package]]
 name = "logfire"
 version = "5.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -671,6 +680,7 @@ dependencies = [
     { name = "logfire" },
     { name = "modal" },
     { name = "pydantic" },
+    { name = "pydantic-ai-harness" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
     { name = "python-dotenv" },
     { name = "rich" },
@@ -689,6 +699,7 @@ requires-dist = [
     { name = "logfire", specifier = ">=2.0" },
     { name = "modal", specifier = ">=0.64" },
     { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic-ai-harness", specifier = ">=0.32.0" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=0.0.30" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
@@ -751,6 +762,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/53/ef/fc4f868f4e2cee79f863883abffceff107875f569b848507319842d2a681/pydantic-2.13.5.tar.gz", hash = "sha256:51a9c5f7b2f8e636f04c6cada605d9b6a3bf1348fdf945a3d8869b19bba0ee08", size = 845750 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/47/c95ffc2009878c7aac0c5e08528022dcb885933252a88b5f170058014464/pydantic-2.13.5-py3-none-any.whl", hash = "sha256:346a034f080da3755d8e9cb5e00e8b07de1d39e4f6e2c87d8ab7cafa0b269a73", size = 472589 },
+]
+
+[[package]]
+name = "pydantic-ai-harness"
+version = "0.32.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "genai-prices" },
+    { name = "httpx" },
+    { name = "json-repair" },
+    { name = "pydantic-ai-slim" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/66/3def8e4a92726f34b90f2569584fe46220d65cf10dfcdd4f18f8f8502027/pydantic_ai_harness-0.32.0.tar.gz", hash = "sha256:9296587706021d8ccb33870e30762a3f95eaf7993fa41ea44e6c689c5ee72de6", size = 2795637 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8e/ab/bd3fe73a11c9476d7d2bad750e47c05da20091dcd69119dbb8362a63ebf5/pydantic_ai_harness-0.32.0-py3-none-any.whl", hash = "sha256:459d562c298313dfae6d478080f923a5cc73831fd5f2b96f0608e009182e62fe", size = 896774 },
 ]
 
 [[package]]

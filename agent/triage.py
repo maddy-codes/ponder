@@ -38,29 +38,40 @@ PUZZLE = (
 )
 CODE = ("write a python function", "return only the code", "o(log n)")
 LOOKUP = (
-    "capital of", "chemical symbol", "what year", "plural of", "how many sides",
-    "in what year",
+    "chemical symbol", "stands for", "abbreviation", "normal range", "reference range",
+    "generic name", "which vitamin", "how many days in", "what colour",
 )
 # Directly-stated computations: long prompt, but one or two operations.
 DIRECT = (
-    "mg/kg", "per kg", "per hour", "per km", "% of", "vat at", "simple annual interest",
-    "per hour for", "to one decimal place", "safety factor", "maximum working load",
+    "mg/kg", "mcg/kg", "per kg", "ml/kg", "per hour", "ml/hour", "% of", "mg per kg",
+    "to one decimal place", "per dose", "units per", "per minute",
 )
 
 # --- stakes signals --------------------------------------------------------
-# Domain nouns only. "pounds" or "coins" alone is not a stakes signal -- the
-# bat-and-ball puzzle is priced in pounds and could not matter less.
+# Clinical consequence only. A number is not high-stakes because it is large or
+# fiddly -- it is high-stakes because a wrong answer reaches a patient. The ward
+# rota puzzles below are genuinely hard and deliberately score LOW here, which is
+# the whole point of the hard/low-stakes quadrant.
+#
+# Three tiers, because "clinical" is not one level of danger. A high-alert drug and
+# a paracetamol query are not the same bet, and flattening them would hide the
+# judgement the policy is supposed to be making.
+HIGH_ALERT = (
+    "insulin", "heparin", "warfarin", "morphine", "opioid", "fentanyl", "oxycodone",
+    "methotrexate", "chemotherapy", "cytotoxic", "potassium chloride", "digoxin",
+    "vancomycin", "gentamicin", "anticoagulant", "thrombolysis",
+)
 CLINICAL = (
-    "dose", "mg/kg", "patient", "paediatric", "pediatric", "infusion", "insulin",
-    "paracetamol", "drug", "carbohydrate", "body weight", "mg per kg",
+    "dose", "dosage", "mg/kg", "mcg/kg", "patient", "paediatric", "pediatric", "infant",
+    "neonate", "neonatal", "child", "infusion", "infuse", "prescribe", "prescribed",
+    "drug", "medicine", "medication", "tablet", "body weight", "administer",
+    "creatinine", "egfr", "renal", "dialysis", "bolus", "titrate",
 )
-SAFETY = (
-    "safety factor", "bridge", "cable", "coolant", "valve", "reactor", "aircraft",
-    "fuel", "worst-case", "rated to", "must close within",
-)
-FINANCIAL = (
-    "vat", "invoice", "payroll", "loan", "interest", "ledger", "closing balance",
-    "threshold", "transfer", "tax", "turnover", "turned over", "gross total",
+# Identifiable data is its own axis of consequence: a disclosure harms the patient
+# even when every number in the answer is right.
+CONFIDENTIAL = (
+    "discharge summary", "referral letter", "patient record", "clinic letter",
+    "nhs number", "hospital number", "date of birth", "next of kin", "handover",
 )
 
 
@@ -80,14 +91,16 @@ def heuristic_triage(prompt: str) -> Triage:
         difficulty = 0.05
     difficulty = round(min(0.97, max(0.03, difficulty)), 3)
 
-    clinical, safety, financial = (_hits(text, g) for g in (CLINICAL, SAFETY, FINANCIAL))
+    high_alert, clinical, confidential = (
+        _hits(text, g) for g in (HIGH_ALERT, CLINICAL, CONFIDENTIAL)
+    )
     stakes = 0.12
     if clinical:
-        stakes = max(stakes, 0.88 + 0.02 * min(len(clinical), 3))
-    if safety:
-        stakes = max(stakes, 0.82 + 0.02 * min(len(safety), 3))
-    if financial:
-        stakes = max(stakes, 0.74 + 0.03 * min(len(financial), 3))
+        stakes = max(stakes, 0.84 + 0.02 * min(len(clinical), 3))
+    if confidential:
+        stakes = max(stakes, 0.88 + 0.02 * min(len(confidential), 3))
+    if high_alert:
+        stakes = max(stakes, 0.92 + 0.02 * min(len(high_alert), 3))
     if code:
         stakes += 0.18                            # code gets executed; that raises the floor
     stakes = round(min(0.98, max(0.02, stakes)), 3)
@@ -101,7 +114,9 @@ def heuristic_triage(prompt: str) -> Triage:
         why.append("lookup")
     if direct:
         why.append("direct-arithmetic")
-    for label, group in (("clinical", clinical), ("safety", safety), ("financial", financial)):
+    for label, group in (
+        ("high-alert", high_alert), ("clinical", clinical), ("confidential", confidential)
+    ):
         if group:
             why.append(f"{label}:{group[0]}")
     return Triage(difficulty, stakes, ", ".join(why) or "no strong signals")
@@ -110,8 +125,10 @@ def heuristic_triage(prompt: str) -> Triage:
 _GEMINI_PROMPT = """You are triaging a task for an agent that must decide how much compute to spend.
 Score two independent axes from 0 to 1:
 - difficulty: how likely a small model is to get this wrong in a single cheap pass.
-- stakes: how much damage a wrong answer causes (clinical, financial, safety-critical = high;
-  trivia and puzzles = low). Stakes is about consequence, NOT difficulty.
+- stakes: how much harm a wrong answer causes a patient. Anything that reaches a patient --
+  a dose, an infusion rate, a high-alert drug, identifiable data in a letter -- is high.
+  Ward logistics, rota arithmetic and reference lookups are low, however fiddly they are.
+  Stakes is about clinical consequence, NOT difficulty.
 Reply with strict JSON only: {"difficulty": <float>, "stakes": <float>, "rationale": "<12 words>"}
 
 TASK:

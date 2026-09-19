@@ -51,7 +51,7 @@ def lines(capsys, tmp_path, monkeypatch):
 
 
 async def test_stream_emits_stages_and_one_final(lines):
-    got = await lines("What is the total cost of 3 items at 4.50 each?")
+    got = await lines("A 24 kg child is prescribed 20 mg/kg per dose. What is the dose?")
     assert len(got) >= 2, "the loop publishes progress before the durable emit"
     assert [snap["final"] for snap in got].count(True) == 1
     assert got[-1]["final"] is True, "the last line must be the durable event"
@@ -59,7 +59,7 @@ async def test_stream_emits_stages_and_one_final(lines):
 
 async def test_every_line_is_a_valid_taskevent(lines):
     """The bench types these as TaskEvent, so a drifted field would break it."""
-    got = await lines("What is the capital of Peru?")
+    got = await lines("What is the chemical symbol for potassium?")
     for snap in got:
         TaskEvent.model_validate({k: v for k, v in snap.items() if k != "final"})
 
@@ -67,10 +67,10 @@ async def test_every_line_is_a_valid_taskevent(lines):
 async def test_first_snapshot_already_carries_the_decision(lines):
     """The whole point: the rail can show triage, rule and budget immediately,
     long before the model has returned anything."""
-    got = await lines("What is the total cost of 3 items at 4.50 each?")
+    got = await lines("A 24 kg child is prescribed 20 mg/kg per dose. What is the dose?")
     first = got[0]
     assert first["status"] == "thinking"
-    assert first["matched_rule"] == "financial_total"
+    assert first["matched_rule"] == "paediatric_dose"
     assert first["budget"] == "deep"
     assert first["samples"], "the fan-out width is known up front"
     assert all(s["status"] == "running" for s in first["samples"])
@@ -79,7 +79,7 @@ async def test_first_snapshot_already_carries_the_decision(lines):
 async def test_totals_roll_up_on_every_snapshot(lines):
     """`roll_up()` normally runs only on the durable emit; the stream does it on a
     copy so the bench can show a running token count that still ends up correct."""
-    got = await lines("What is the total cost of 3 items at 4.50 each?")
+    got = await lines("A 24 kg child is prescribed 20 mg/kg per dose. What is the dose?")
     final = got[-1]
     assert final["total_tokens"] == sum(s["tokens"] for s in final["samples"])
     assert final["status"] == "done"
@@ -88,6 +88,6 @@ async def test_totals_roll_up_on_every_snapshot(lines):
 
 async def test_stream_does_not_disturb_the_durable_event(lines, tmp_path):
     """Snapshotting must not mutate the event the three sinks receive."""
-    got = await lines("What is the capital of Peru?")
+    got = await lines("What is the chemical symbol for potassium?")
     ids = {snap["id"] for snap in got}
     assert ids == {"ponder:streamtest"}, "every line describes the same one task"

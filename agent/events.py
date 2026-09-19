@@ -24,6 +24,14 @@ class Sample(BaseModel):
     gpu_seconds: float = 0.0
 
 
+class GuardrailVerdict(BaseModel):
+    """One named guardrail's verdict on the answer that was about to be returned."""
+
+    name: str
+    outcome: Literal["allow", "retry", "block", "replace"]
+    detail: str = ""
+
+
 class TaskEvent(BaseModel):
     id: str
     prompt_preview: str
@@ -37,6 +45,14 @@ class TaskEvent(BaseModel):
     samples: list[Sample] = Field(default_factory=list)
     sandbox_ran: bool = False
     sandbox_passed: bool | None = None
+    # Guardrails: which named checks the matched rule demanded, how they ruled, and
+    # whether a failure bought more compute. `guardrail_escalated` is the one that
+    # matters for the thesis -- it means a guardrail trip was answered by thinking
+    # harder rather than by refusing.
+    guardrails: list[str] = Field(default_factory=list)
+    guardrail_verdicts: list[GuardrailVerdict] = Field(default_factory=list)
+    guardrail_escalated: bool = False
+    guardrail_blocked: bool = False
     answer: str | None = None
     correct: bool | None = None
     latency_ms: int = 0
@@ -47,6 +63,10 @@ class TaskEvent(BaseModel):
     ts: float = Field(default_factory=time.time)  # ordering for replay; the only addition
 
     @property
+    def guardrails_failed(self) -> list[str]:
+        return [v.name for v in self.guardrail_verdicts if v.outcome != "allow"]
+
+    @property
     def escalated_on_stakes(self) -> bool:
         """The money shot: spent deep compute on something that looked easy."""
         return self.budget == "deep" and self.difficulty < settings.difficulty_deep
@@ -55,6 +75,18 @@ class TaskEvent(BaseModel):
         """Recompute the totals from the samples. Call once before the durable emit."""
         self.total_tokens = sum(s.tokens for s in self.samples)
         self.total_gpu_seconds = round(sum(s.gpu_seconds for s in self.samples), 4)
+
+
+def start_fresh() -> None:
+    """Clear the recording, keeping the old one as `events.jsonl.bak`.
+
+    `--fresh` used to unlink. A run that is then interrupted -- and a full live queue
+    takes minutes -- leaves you with no recording at all and a dashboard that says
+    "events.jsonl not found". The Replay file is the demo, so the previous one is moved
+    aside rather than destroyed: `mv events.jsonl.bak events.jsonl` gets it back.
+    """
+    if EVENTS_PATH.exists():
+        EVENTS_PATH.replace(EVENTS_PATH.with_suffix(".jsonl.bak"))
 
 
 # --------------------------------------------------------------------------- sinks

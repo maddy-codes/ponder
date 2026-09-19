@@ -49,6 +49,9 @@ agent_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
         "pydantic-ai-slim[openai]>=0.0.30", "pydantic>=2.9", "logfire>=2.0",
+        # The guardrail chain runs inside each fan-out container, so the harness has
+        # to be in the image too -- the checks travel with the compute.
+        "pydantic-ai-harness>=0.32",
         # agent.settings calls load_dotenv() at import, so every container needs it.
         "python-dotenv>=1.0",
     )
@@ -118,27 +121,40 @@ def sample_once(payload: dict) -> dict:
 
     task = Task.model_validate(payload["task"])
     started = time.perf_counter()
-    result = _asyncio.run(gateway_sample(task, payload["rule_id"], payload["seed"]))
+    result = _asyncio.run(
+        gateway_sample(
+            task,
+            payload["rule_id"],
+            payload["seed"],
+            tuple(payload.get("guardrails") or ()),
+        )
+    )
     return {
         "text": result.text,
         "tokens": result.tokens,
         "gpu_seconds": round(time.perf_counter() - started, 4),
         "ok": result.ok,
         "error": result.error,
+        "blocked": result.blocked,
     }
 
 
-def _fan_out_blocking(task_payload: dict, rule_id: str, n: int) -> list[dict]:
+def _fan_out_blocking(task_payload: dict, rule_id: str, n: int, guardrails: tuple) -> list[dict]:
     fn = modal.Function.from_name(APP_NAME, "sample_once")
-    payloads = [{"task": task_payload, "rule_id": rule_id, "seed": i} for i in range(n)]
+    payloads = [
+        {"task": task_payload, "rule_id": rule_id, "seed": i, "guardrails": list(guardrails)}
+        for i in range(n)
+    ]
     return list(fn.map(payloads))
 
 
-async def remote_fan_out(task, rule_id: str, n: int):
+async def remote_fan_out(task, rule_id: str, n: int, guardrails: tuple = ()):
     """Called by agent.worker.fan_out when Modal is live."""
     from agent.worker import WorkerResult
 
-    raw = await asyncio.to_thread(_fan_out_blocking, task.model_dump(), rule_id, n)
+    raw = await asyncio.to_thread(
+        _fan_out_blocking, task.model_dump(), rule_id, n, tuple(guardrails)
+    )
     return [
         WorkerResult(
             text=r.get("text", ""),
@@ -146,6 +162,7 @@ async def remote_fan_out(task, rule_id: str, n: int):
             gpu_seconds=float(r.get("gpu_seconds", 0.0)),
             ok=bool(r.get("ok", True)),
             error=str(r.get("error", "")),
+            blocked=bool(r.get("blocked", False)),
         )
         for r in raw
     ]

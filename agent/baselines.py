@@ -15,7 +15,7 @@ import asyncio
 import json
 from dataclasses import asdict, dataclass
 
-from agent.events import TaskEvent, get_emitter
+from agent.events import TaskEvent, get_emitter, start_fresh
 from agent.loop import run_queue
 from agent.settings import ARTIFACTS, EVENTS_PATH, settings
 from agent.tasks import Task, load_tasks
@@ -131,8 +131,8 @@ def main() -> None:
     ap.add_argument("--strategies", default="cheap,deep,ponder")
     args = ap.parse_args()
 
-    if args.fresh and EVENTS_PATH.exists():
-        EVENTS_PATH.unlink()
+    if args.fresh:
+        start_fresh()
 
     tasks = load_tasks()[: args.limit] if args.limit else load_tasks()
     strategies = args.strategies.split(",")
