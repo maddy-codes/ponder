@@ -21,6 +21,10 @@ class Decision:
     reason: Literal["trivial", "difficulty", "stakes-override", "both"]
     sandbox: bool
     samples: int
+    # Set by agent/rules.py when a named domain rule decided instead of the score.
+    # `reason` above always stays the scored reason, so the two layers stay legible.
+    matched_rule: str | None = None
+    rule_reason: str | None = None
 
     @property
     def is_money_shot(self) -> bool:

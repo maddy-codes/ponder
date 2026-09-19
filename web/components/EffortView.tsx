@@ -1,6 +1,6 @@
 "use client";
 
-import { bareId, escalatedOnStakes, type TaskEvent } from "@/lib/types";
+import { bareId, escalatedOnStakes, ruleOverrode, type TaskEvent } from "@/lib/types";
 import type { Stage } from "@/lib/useRun";
 
 function Meter({ label, value, tone }: { label: string; value: number; tone: "diff" | "stakes" }) {
@@ -42,6 +42,7 @@ export function EffortView({
   }
 
   const money = escalatedOnStakes(event) && event.stakes >= 0.66;
+  const overrode = ruleOverrode(event);
   const lit = event.samples.slice(0, Math.max(samplesLit, 1));
 
   return (
@@ -76,7 +77,37 @@ export function EffortView({
           <Meter label="stakes" value={event.stakes} tone="stakes" />
         </div>
 
-        {money && (
+        {event.matched_rule ? (
+          <div
+            className={`rounded-lg border px-3 py-2 ${
+              overrode
+                ? "border-violet-500/50 bg-violet-500/10"
+                : "border-zinc-700/70 bg-zinc-900/60"
+            }`}
+          >
+            <div className="flex items-baseline gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-violet-300">
+                domain rule
+              </span>
+              <code className="font-mono text-[11px] text-violet-200">{event.matched_rule}</code>
+              <span className="ml-auto text-[9px] font-semibold uppercase tracking-widest text-zinc-500">
+                {overrode ? "overrode the score" : "confirmed the score"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-snug text-zinc-400">{event.rule_reason}</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
+              domain rule
+            </span>
+            <span className="ml-2 text-xs text-zinc-600">
+              none matched — the difficulty × stakes score decides
+            </span>
+          </div>
+        )}
+
+        {money && !overrode && (
           <div className="pop rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-300">
               escalated on stakes
@@ -167,10 +198,15 @@ export function EffortView({
           {stage === "done" && (
             <span
               className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${
-                event.correct ? "bg-emerald-400/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"
+                event.correct === null
+                  ? "bg-zinc-700/40 text-zinc-400"
+                  : event.correct
+                    ? "bg-emerald-400/15 text-emerald-300"
+                    : "bg-rose-500/15 text-rose-300"
               }`}
             >
-              {event.correct ? "correct" : "miss"}
+              {/* A task typed in live has no held-out answer, so it is ungraded -- not a miss. */}
+              {event.correct === null ? "ungraded" : event.correct ? "correct" : "miss"}
             </span>
           )}
         </div>

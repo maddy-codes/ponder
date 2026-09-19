@@ -31,6 +31,8 @@ const VERIFY_TICKS = 5;
  */
 export function useRun(speed: number, playing: boolean, strategy = "ponder") {
   const [all, setAll] = useState<TaskEvent[]>([]);
+  /** Events produced live by the input box, kept apart so the replay fetch cannot clobber them. */
+  const [injected, setInjected] = useState<TaskEvent[]>([]);
   const [frontier, setFrontier] = useState<Frontier | null>(null);
   const [ruleProof, setRuleProof] = useState<RuleProof | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,7 +66,11 @@ export function useRun(speed: number, playing: boolean, strategy = "ponder") {
     };
   }, []);
 
-  const queue = useMemo(() => all.filter((e) => e.strategy === strategy), [all, strategy]);
+  const queue = useMemo(() => {
+    const replayed = all.filter((e) => e.strategy === strategy);
+    const seen = new Set(replayed.map((e) => e.id));
+    return [...replayed, ...injected.filter((e) => !seen.has(e.id))];
+  }, [all, injected, strategy]);
   const deepByTask = useMemo(() => {
     const map = new Map<string, TaskEvent>();
     for (const e of all) if (e.strategy === "deep") map.set(e.id.split(":").pop()!, e);
@@ -73,6 +79,26 @@ export function useRun(speed: number, playing: boolean, strategy = "ponder") {
 
   const reset = useCallback(() => {
     setIndex(0);
+    setStage("thinking");
+    setSamplesLit(0);
+    verifyTicks.current = 0;
+  }, []);
+
+  // An injected event is appended, never replaces one, so its position is exactly
+  // the queue length at the moment it arrives. The ref keeps that out of the tick.
+  const queueLen = useRef(0);
+  useEffect(() => {
+    queueLen.current = queue.length;
+  }, [queue]);
+
+  /**
+   * Take a TaskEvent the agent just produced for a typed-in task and play it.
+   * It joins the same queue and runs through the same stages as a replayed one --
+   * the only difference is that it was emitted a second ago rather than last night.
+   */
+  const inject = useCallback((event: TaskEvent) => {
+    setInjected((prev) => (prev.some((e) => e.id === event.id) ? prev : [...prev, event]));
+    setIndex(queueLen.current);
     setStage("thinking");
     setSamplesLit(0);
     verifyTicks.current = 0;
@@ -145,5 +171,5 @@ export function useRun(speed: number, playing: boolean, strategy = "ponder") {
     total: queue.length,
   };
 
-  return { state, frontier, ruleProof, reset, queue };
+  return { state, frontier, ruleProof, reset, inject, queue };
 }

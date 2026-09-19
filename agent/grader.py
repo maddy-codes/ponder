@@ -32,7 +32,10 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9:.]+", " ", (text or "").lower()).strip()
 
 
-def grade(task: Task, answer: str | None) -> bool:
+def grade(task: Task, answer: str | None) -> bool | None:
+    """None means "no reference to grade against" -- an ad-hoc task is not a miss."""
+    if not task.has_reference:
+        return None
     if not answer:
         return False
     if task.kind == "numeric":

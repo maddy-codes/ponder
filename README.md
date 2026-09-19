@@ -1,12 +1,46 @@
-# Ponder — an agent that decides how hard to think
+# Ponder — the layer between a domain rule and how hard the model thinks
 
-Ponder scores every task on **difficulty × stakes** and allocates compute accordingly.
-Trivial items get one cheap call. Hard or high-stakes items get a deep-reasoning rule,
-best-of-N sampling fanned out across Modal containers, and — when being wrong is
-expensive — an answer that is **executed in a sandbox before it is trusted**.
+> Reasoning-effort control already exists as a provider API parameter — OpenAI ships
+> `reasoning_effort`, Anthropic ships `budget_tokens`, Gemini ships `thinkingLevel`.
+> Domain compliance and verification systems already exist too. **Neither connects a named
+> domain rule to how much the model reasons and verifies before its answer is trusted.**
+> Ponder is that connective layer: write a rule once — *"financial totals always get
+> verified"* — and it governs effort and verification automatically, auditable through
+> Logfire, without touching the model or the prompt.
+
+Underneath that layer, Ponder scores every task on **difficulty × stakes** and allocates
+compute accordingly. Trivial items get one cheap call. Hard or high-stakes items get a
+deep-reasoning rule, best-of-N sampling fanned out across Modal containers, and — when being
+wrong is expensive — an answer that is **executed in a sandbox before it is trusted**. A
+named rule outranks that score whenever one applies.
 
 The result is not "more accurate". It is **the same accuracy where it matters, for half
 the compute, with the remaining errors pushed onto tasks nobody is harmed by**.
+
+## Using it
+
+Ponder is designed as a drop-in replacement for a direct model call — same interface, plus an
+effort decision and an audit trail.
+
+```python
+# before — your agent calls the model directly
+answer = model.complete(prompt)
+
+# after — same call shape, Ponder decides the effort
+from agent.ask import ponder
+
+result = ponder(prompt)
+# result.answer        — the response
+# result.matched_rule  — which domain rule fired, if any ("financial_total")
+# result.rule_reason   — why that rule exists, and what it overrode
+# result.budget        — "cheap" or "deep"
+# result.verified      — True if a sandbox executed and confirmed it
+# result.event         — the full TaskEvent, already in Logfire, Convex and events.jsonl
+```
+
+```bash
+uv run python -m agent.ask "What is the total cost of 3 items at 4.50 each?"
+```
 
 Measured over a 40-task queue (`agent/tasks.jsonl`, `artifacts/frontier.json`):
 
@@ -18,6 +52,48 @@ Measured over a 40-task queue (`agent/tasks.jsonl`, `artifacts/frontier.json`):
 
 Ponder holds always-deep's high-stakes accuracy on **51% of the compute**, and 82% of the
 errors it does make are on things like a lily-pad riddle.
+
+---
+
+## The rule layer
+
+`agent/rules.py` holds a short list of **named, human-authored domain rules**. Each one matches
+on the prompt — the same text triage sees, never the held-out ground truth — and states outright
+what the match buys:
+
+| rule | budget | verify | why |
+|---|---|---|---|
+| `clinical_dose` | deep | ✅ | dosing arithmetic is executed before it is trusted, however simple the sum |
+| `safety_margin` | deep | ✅ | load, tolerance and timing margins — a plausible-looking number is the failure mode |
+| `financial_total` | deep | ✅ | financial totals are always deep-verified regardless of apparent difficulty |
+| `casual_lookup` | cheap | — | casual factual lookups never warrant deep reasoning |
+
+A matched rule **outranks** the numeric score. With no match, `budget = f(difficulty, stakes)`
+decides exactly as before, so the rule layer is additive rather than a replacement. Escalating
+rules are declared first, so a dose question phrased as a lookup still escalates.
+
+Every `TaskEvent` records `matched_rule` and `rule_reason`, and the reason says what the score
+alone would have spent when the two disagreed — which is the audit trail for *"the policy, not
+the classifier, chose this"*:
+
+```
+What is the total cost of 3 items at 4.50 each?
+  difficulty 0.22 · stakes 0.12   →  the score alone would have spent cheap
+  rule financial_total             →  deep, 5 samples, executed verification
+```
+
+On the 40-task benchmark queue the rules and the score agree on every task, so the frontier
+numbers below are unchanged by this layer. The disagreement is easiest to see by typing a task
+into Mission Control yourself.
+
+### Above the provider's own effort control, not beside it
+
+The deep path sets **both** actuators: our Gateway rule *and* — where the served model exposes
+one — the model's own reasoning parameter (`reasoning_effort`, and vLLM's `enable_thinking`
+chat-template passthrough), from the same rule selection. Ponder sits above provider-level
+reasoning controls: it decides *when* to invoke them, not just how much. Best-effort by design —
+many open-weight models expose nothing here, and a rejected parameter retries without it rather
+than losing the sample. `PONDER_NATIVE_EFFORT=0` turns it off.
 
 ---
 
@@ -76,6 +152,7 @@ for scoring error placement.
 Task in
   → triage        difficulty, stakes  (prompt text only)
   → budget        stakes can OVERRIDE difficulty
+  → rules         a NAMED domain rule outranks the score, and can demand verification
   → spend         cheap: 1 call, answer-only rule
                   deep:  deep-reasoning rule + N Modal samples + sandbox if high-stakes
   → aggregate     majority vote across samples
@@ -99,7 +176,7 @@ uv sync --extra dev
 
 uv run python -m agent.loop --strategy ponder --fresh   # one pass over the queue
 uv run python -m agent.baselines --fresh                # cheap vs deep vs ponder -> artifacts/frontier.json
-uv run pytest                                           # 20 tests
+uv run pytest                                           # 35 tests
 
 cd web && npm install && npm run dev                    # Mission Control on :3000
 ```
@@ -117,9 +194,17 @@ PONDER_MODE=live uv run python scripts/prove_rule.py --task s01
 ## Mission Control
 
 `web/` is a **renderer**: every pixel comes from a `TaskEvent` that the agent already emitted.
-Four zones — Queue, Effort view (triage meters, the Gateway rule, Modal samples lighting up,
-the sandbox tick), Cost-vs-accuracy frontier + live spend against an always-deep
-counterfactual, and an Evidence strip with the two Logfire links and the token delta.
+Four zones — Queue, Effort view (triage meters, the matched domain rule, the Gateway rule, Modal
+samples lighting up, the sandbox tick), Cost-vs-accuracy frontier + live spend against an
+always-deep counterfactual, and an Evidence strip with the two Logfire links and the token delta.
+
+**Ask Ponder** — the input box above the grid takes one task, runs it through `POST /api/ask` →
+`agent.ask` → the same `run_task` the batch queue uses, and drops the resulting event into the
+same Queue and Effort view. No special-casing: it triages, matches a rule, spends, verifies and
+emits its one TaskEvent like any other task. Type a financial question that looks trivial and
+watch the rule overrule the score. (In stub mode the model's *words* are the one thing the
+simulator cannot supply, so the answer field says so; the decision, the rule, the fan-out width
+and the token and GPU numbers are all real.)
 
 `events.jsonl` is written on every run regardless of what else is up, and the dashboard's
 Replay mode plays it back. The demo never depends on a live GPU.
@@ -128,7 +213,8 @@ Replay mode plays it back. The demo never depends on a live GPU.
 
 ```
 agent/    settings, events (the TaskEvent contract + 3-sink emitter), tasks, triage, budget,
-          worker (stub | Gateway), aggregate, verify, sandbox, grader, loop, baselines, modal_app
+          rules (named domain rules), ask (the ponder() entry point), worker (stub | Gateway),
+          aggregate, verify, sandbox, grader, loop, baselines, modal_app
 convex/   schema.ts (taskEvents) + events.ts (upsert/list)
 web/      Next.js App Router · Mission Control
 scripts/  prove_rule.py (Pydantic evidence), build_tasks.py

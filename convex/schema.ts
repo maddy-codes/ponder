@@ -10,6 +10,8 @@ export default defineSchema({
     difficulty: v.number(),
     stakes: v.number(),
     budget: v.string(),
+    matchedRule: v.union(v.string(), v.null()),
+    ruleReason: v.union(v.string(), v.null()),
     ruleId: v.string(),
     strategy: v.string(),
     samples: v.array(

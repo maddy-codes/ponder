@@ -30,6 +30,8 @@ class TaskEvent(BaseModel):
     difficulty: float = 0.0           # 0..1 (triage)
     stakes: float = 0.0               # 0..1 (triage)
     budget: Literal["cheap", "deep"] = "cheap"
+    matched_rule: str | None = None   # named domain rule that decided (agent/rules.py)
+    rule_reason: str | None = None    # why that rule exists, and what it overrode
     rule_id: str = ""                 # Gateway rule applied
     strategy: Literal["cheap", "deep", "ponder"] = "ponder"
     samples: list[Sample] = Field(default_factory=list)

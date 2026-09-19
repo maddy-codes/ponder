@@ -9,6 +9,8 @@ const normalise = (e: any) => ({
   difficulty: Number(e.difficulty ?? 0),
   stakes: Number(e.stakes ?? 0),
   budget: String(e.budget ?? "cheap"),
+  matchedRule: e.matched_rule ?? null,
+  ruleReason: e.rule_reason ?? null,
   ruleId: String(e.rule_id ?? ""),
   strategy: String(e.strategy ?? "ponder"),
   samples: (e.samples ?? []).map((s: any) => ({

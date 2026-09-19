@@ -3,7 +3,7 @@
 import { bareId, escalatedOnStakes, type TaskEvent } from "@/lib/types";
 
 const dot = (e: TaskEvent) =>
-  e.correct ? "bg-emerald-400" : "bg-rose-500";
+  e.correct === null ? "bg-zinc-600" : e.correct ? "bg-emerald-400" : "bg-rose-500";
 
 export function Queue({
   completed,
@@ -46,10 +46,16 @@ export function Queue({
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot(e)}`} />
               <span className="font-mono text-[11px] text-zinc-500">{bareId(e)}</span>
               <span className="flex-1 truncate text-xs text-zinc-400">{e.prompt_preview}</span>
-              {escalatedOnStakes(e) && (
-                <span className="shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">
-                  stakes
+              {e.matched_rule ? (
+                <span className="shrink-0 rounded bg-violet-400/10 px-1.5 py-0.5 font-mono text-[9px] text-violet-300">
+                  {e.matched_rule}
                 </span>
+              ) : (
+                escalatedOnStakes(e) && (
+                  <span className="shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">
+                    stakes
+                  </span>
+                )
               )}
               <span
                 className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${

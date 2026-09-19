@@ -54,10 +54,26 @@ def _corrupt(task: Task, rng: random.Random) -> str:
     return f"```python\n{code.replace('return', 'return None or', 1)}\n```"
 
 
+STUB_NO_ANSWER = (
+    "[stub worker] no completion available — this task was typed in live and has no "
+    "reference answer for the simulator to imitate. Run with PONDER_MODE=live for the "
+    "real model's answer; everything else on this card is real."
+)
+
+
 async def stub_sample(task: Task, budget: str, seed: int) -> WorkerResult:
     """Deterministic given (task id, seed). Deep costs ~10x the tokens of cheap."""
     rng = _rng(task.id, seed)
     deep = budget == "deep"
+
+    if not task.has_reference:
+        # Typed into Mission Control. The simulator mocks the worker model and nothing
+        # else, so triage, the matched rule, the budget, the fan-out width and the
+        # token/GPU accounting below are all genuine -- only the words are missing.
+        tokens = max(12, int(rng.gauss(620, 140) if deep else rng.gauss(58, 14)))
+        gpu_seconds = round(tokens / rng.uniform(55, 95), 4)
+        await asyncio.sleep(gpu_seconds * 0.12)
+        return WorkerResult(text=STUB_NO_ANSWER, tokens=tokens, gpu_seconds=gpu_seconds)
 
     # A cheap single pass degrades sharply with true hardness; the deep reasoning
     # rule recovers most of it, and best-of-N over independent seeds recovers more.
@@ -116,11 +132,45 @@ def _agent_for(rule_id: str):
     return agent
 
 
+async def _run(agent, prompt: str, effort: dict | None):
+    """Run the agent, and fall back once if the endpoint rejects the effort parameter.
+
+    A served model that has never seen `reasoning_effort` returns a 400 rather than
+    ignoring it, and losing the whole sample to an optional parameter would be a
+    silly way to fail a live demo.
+    """
+    if effort is None:
+        return await agent.run(prompt)
+    try:
+        return await agent.run(prompt, model_settings=effort)
+    except Exception as exc:  # pragma: no cover - endpoint dependent
+        print(f"[worker] native effort parameter rejected, retrying without it: {str(exc)[:120]}")
+        return await agent.run(prompt)
+
+
+def effort_settings(rule_id: str) -> dict:
+    """The model's OWN reasoning control, set from the same rule that set ours.
+
+    Ponder sits *above* provider-level effort parameters rather than duplicating
+    them: selecting a Gateway rule is what decides the setting, and the setting is
+    passed through to whatever the served model exposes. Best-effort by design --
+    many open-weight models expose nothing here, and the deep path is still deep
+    without it because the rule and the fan-out are doing the work.
+    """
+    deep = rule_id != settings.rule_cheap
+    return {
+        "openai_reasoning_effort": "high" if deep else "low",
+        # vLLM's passthrough for hybrid-reasoning chat templates (Qwen3 et al).
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": deep}},
+    }
+
+
 async def gateway_sample(task: Task, rule_id: str, seed: int) -> WorkerResult:
     agent = _agent_for(rule_id)
     started = time.perf_counter()
+    effort = effort_settings(rule_id) if settings.native_effort else None
     try:
-        result = await agent.run(task.prompt)
+        result = await _run(agent, task.prompt, effort)
     except Exception as exc:  # pragma: no cover - network dependent
         return WorkerResult("", 0, 0.0, ok=False, error=str(exc)[:200])
     elapsed = time.perf_counter() - started
@@ -175,6 +225,10 @@ async def stub_recompute(task: Task, seed: int) -> WorkerResult:
     """Simulated second derivation. Independent of the first pass, so it usually
     disagrees with a wrong answer -- which is the point of verifying."""
     rng = _rng(task.id + ":verify", seed)
+    if not task.has_reference:
+        # Nothing to recompute against; verify() reports this as inconclusive rather
+        # than inventing a verdict.
+        return WorkerResult("", 0, 0.0, ok=False, error="stub verifier has no reference to recompute")
     right = rng.random() < 0.86
     value = task.answer if right else _corrupt(task, rng)
     literal = repr(value.strip())
@@ -211,7 +265,7 @@ async def recompute_program(task: Task, rule_id: str, seed: int = 99) -> WorkerR
     )
     started = time.perf_counter()
     try:
-        result = await agent.run(task.prompt)
+        result = await _run(agent, task.prompt, effort_settings(rule_id) if settings.native_effort else None)
     except Exception as exc:  # pragma: no cover
         return WorkerResult("", 0, 0.0, ok=False, error=str(exc)[:200])
     usage = result.usage()

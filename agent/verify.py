@@ -39,7 +39,10 @@ async def verify(task: Task, answer: str, rule_id: str) -> Verification:
         code = extract_code(answer)
         names = _DEF.findall(code)
         if not names:
-            return Verification(True, False, "no function defined in the answer")
+            # With no held-out checks there is nothing to have failed -- an ad-hoc
+            # task that produced no code is unverified, not verified-wrong.
+            return Verification(True, False if task.has_reference else None,
+                                "no function defined in the answer")
         smoke = [f"assert callable({names[-1]}), 'not callable'"]
         result = execute(code, smoke)
         return Verification(True, result.passed, result.summary)

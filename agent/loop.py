@@ -14,6 +14,7 @@ from agent.aggregate import majority
 from agent.budget import Decision, decide
 from agent.events import Emitter, Sample, TaskEvent, get_emitter
 from agent.grader import grade
+from agent.rules import apply as apply_rules
 from agent.settings import EVENTS_PATH, settings
 from agent.tasks import Task, load_tasks
 from agent.triage import Triage, triage
@@ -23,11 +24,17 @@ from agent.worker import fan_out
 
 def plan(task: Task, strategy: str) -> tuple[Triage, Decision]:
     """Triage always runs -- the baselines need the same scores for reporting --
-    but only the ponder strategy lets it decide anything."""
+    but only the ponder strategy lets it decide anything.
+
+    Two layers, in order: the numeric difficulty x stakes score, then any named
+    domain rule that outranks it. The baselines deliberately see neither -- an
+    always-deep baseline that consulted the rules would stop being a baseline.
+    """
     scores = triage(task.prompt)
     executable = task.kind == "exec"
     if strategy == "ponder":
-        return scores, decide(scores.difficulty, scores.stakes, executable=executable)
+        scored = decide(scores.difficulty, scores.stakes, executable=executable)
+        return scores, apply_rules(task.prompt, scored, executable=executable)
     if strategy == "cheap":
         return scores, Decision(budget="cheap", reason="trivial", sandbox=False, samples=1)
     return scores, Decision(              # always-deep: maximum effort on everything
@@ -48,6 +55,8 @@ async def run_task(task: Task, strategy: str = "ponder", emitter: Emitter | None
         difficulty=scores.difficulty,
         stakes=scores.stakes,
         budget=decision.budget,
+        matched_rule=decision.matched_rule,
+        rule_reason=decision.rule_reason,
         rule_id=rule_id,
         strategy=strategy,  # type: ignore[arg-type]
         status="thinking",

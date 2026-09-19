@@ -13,11 +13,18 @@ from agent.settings import TASKS_PATH
 class Task(BaseModel):
     id: str
     prompt: str
-    answer: str
-    kind: Literal["numeric", "exact", "exec"]
-    stakes_tag: Literal["low", "med", "high"]
+    # Empty for a task typed into Mission Control: there is no held-out answer to
+    # grade against, and saying so is better than scoring it against nothing.
+    answer: str = ""
+    kind: Literal["numeric", "exact", "exec"] = "numeric"
+    stakes_tag: Literal["low", "med", "high"] = "low"
     hardness: float = 0.5           # ground truth for the stub worker ONLY; triage never reads it
     checks: list[str] = Field(default_factory=list)
+
+    @property
+    def has_reference(self) -> bool:
+        """False for an ad-hoc task. Grading and stub simulation both need to know."""
+        return bool(self.answer.strip())
 
     @property
     def preview(self) -> str:

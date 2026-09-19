@@ -6,6 +6,7 @@ import { EvidenceStrip } from "@/components/EvidenceStrip";
 import { FrontierMeter } from "@/components/FrontierMeter";
 import { Queue } from "@/components/Queue";
 import { SpendCounter } from "@/components/SpendCounter";
+import { TaskInput } from "@/components/TaskInput";
 import { useRun } from "@/lib/useRun";
 
 const SPEEDS = [1, 2, 4];
@@ -13,7 +14,7 @@ const SPEEDS = [1, 2, 4];
 export default function MissionControl() {
   const [speed, setSpeed] = useState(2);
   const [playing, setPlaying] = useState(true);
-  const { state, frontier, ruleProof, reset } = useRun(speed, playing);
+  const { state, frontier, ruleProof, reset, inject } = useRun(speed, playing);
 
   return (
     <main className="mx-auto flex h-screen max-w-[1500px] flex-col gap-3 p-4">
@@ -24,7 +25,8 @@ export default function MissionControl() {
             <span className="text-zinc-400">Mission Control</span>
           </h1>
           <p className="text-xs text-zinc-500">
-            An agent that decides how hard to think — difficulty × stakes → compute.
+            A named domain rule decides how hard the model thinks — and whether its answer is
+            verified before you trust it.
           </p>
         </div>
 
@@ -65,6 +67,13 @@ export default function MissionControl() {
           {state.error}
         </div>
       )}
+
+      <TaskInput
+        onEvent={(event) => {
+          setPlaying(true);
+          inject(event);
+        }}
+      />
 
       <div className="grid min-h-0 flex-1 grid-cols-12 gap-3">
         <div className="col-span-3 min-h-0">

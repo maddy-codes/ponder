@@ -7,6 +7,9 @@ export type TaskEvent = {
   difficulty: number;
   stakes: number;
   budget: "cheap" | "deep";
+  /** named domain rule that decided, from agent/rules.py */
+  matched_rule: string | null;
+  rule_reason: string | null;
   rule_id: string;
   strategy: "cheap" | "deep" | "ponder";
   samples: Sample[];
@@ -52,3 +55,7 @@ export type RuleProof = {
 export const escalatedOnStakes = (e: TaskEvent) => e.budget === "deep" && e.difficulty < 0.55;
 
 export const bareId = (e: TaskEvent) => e.id.split(":").pop() ?? e.id;
+
+/** The rule engine visibly outranking the classifier. */
+export const ruleOverrode = (e: TaskEvent) =>
+  Boolean(e.matched_rule) && (e.rule_reason ?? "").includes("would have spent");

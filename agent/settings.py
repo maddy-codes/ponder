@@ -36,6 +36,10 @@ class Settings:
     rule_cheap: str = field(default_factory=lambda: _env("GATEWAY_RULE_CHEAP", "ponder-cheap-answer-only"))
     rule_deep: str = field(default_factory=lambda: _env("GATEWAY_RULE_DEEP", "ponder-deep-reason"))
 
+    # Best-effort: also set the worker model's OWN reasoning control on the deep
+    # path, not just ours. Turn off if the served model rejects the parameter.
+    native_effort: bool = field(default_factory=lambda: _env("PONDER_NATIVE_EFFORT", "1") not in {"0", "off", "false"})
+
     modal_token_id: str = field(default_factory=lambda: _env("MODAL_TOKEN_ID"))
     model_endpoint_url: str = field(default_factory=lambda: _env("MODEL_ENDPOINT_URL"))
 

@@ -46,6 +46,7 @@ items.
 Task in
   → triage.py    difficulty, stakes (0..1 each; crude scoring is fine)
   → budget = f(difficulty, stakes)          # stakes can override difficulty
+  → rules.py     a NAMED domain rule outranks that score, and may demand verification
   → spend:  cheap → 1 call, answer-only Gateway rule
             deep  → deep-reasoning Gateway rule + N parallel Modal samples (best-of-N)
                     + sandbox verification when stakes are high
@@ -59,6 +60,24 @@ but hard** (deliberately don't spend).
 
 Split of responsibilities: **the agent is Python** (local or on Modal). **Convex + Next.js are the
 app/transport layer only** — Vercel hosts the frontend, never the agent.
+
+## The rule layer (the differentiator)
+
+Reasoning-effort control is a shipped provider API parameter, and answer-compliance checking is
+a product category. Neither connects a **named domain rule** to **how much the model reasons and
+verifies before its answer is trusted**. `agent/rules.py` is that connective layer, and it is
+the thing to protect when pitching: without it Ponder reads as difficulty-based routing.
+
+Named rules match on the prompt only, are declared escalate-first, and **outrank** the numeric
+score; with no match `budget = f(difficulty, stakes)` decides as before. `matched_rule` and
+`rule_reason` on `TaskEvent` are the audit trail, and `rule_reason` names what the score alone
+would have spent whenever the two disagreed. Baselines (`cheap`/`deep`) must never consult the
+rules — `loop.plan()` gates that on `strategy == "ponder"`.
+
+`agent/ask.py` exposes `ponder(prompt)`: the documented drop-in entry point, used by the README
+snippet, the CLI, and Mission Control's single-task box. It wraps a typed prompt as a `Task` with
+no reference answer and hands it to the same `run_task`. A reference-free task grades to `None`
+(ungraded, not a miss), and the stub worker says outright that it has no completion to imitate.
 
 ## The central contract
 
@@ -79,9 +98,11 @@ an MoE model risks sitting unscheduled.
 ## Layout (target)
 
 ```
-agent/    loop.py triage.py gateway.py modal_app.py events.py grader.py baselines.py tasks.jsonl
+agent/    loop.py triage.py rules.py ask.py gateway.py modal_app.py events.py grader.py
+          baselines.py tasks.jsonl
 convex/   schema.ts events.ts
-web/      app/page.tsx components/{Queue,EffortView,FrontierMeter,SpendCounter,EvidenceStrip}
+web/      app/page.tsx app/api/ask/route.ts
+          components/{Queue,EffortView,FrontierMeter,SpendCounter,EvidenceStrip,TaskInput}
 events.jsonl   # recorded known-good run (Replay)
 ```
 
@@ -91,7 +112,8 @@ events.jsonl   # recorded known-good run (Replay)
 uv sync --extra dev
 uv run python -m agent.loop --strategy ponder --fresh   # queue run; --task <id> for one
 uv run python -m agent.baselines --fresh                # frontier -> artifacts/frontier.json
-uv run pytest                                           # 20 tests; -k budget for the thesis
+uv run pytest                                           # 35 tests; -k budget for the thesis
+uv run python -m agent.ask "..."                        # one prompt through the same pipeline
 uv run python scripts/build_tasks.py                    # regenerate agent/tasks.jsonl
 uv run python scripts/prove_rule.py --task s01          # Pydantic evidence (needs live creds)
 cd web && npm run dev                                   # Mission Control at :3000
